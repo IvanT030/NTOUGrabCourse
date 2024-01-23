@@ -65,6 +65,8 @@
 # pylint: disable=unused-argument
 # This program is dedicated to the public domain under the CC0 license.
 import logging
+import os
+from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -82,6 +84,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+load_dotenv()
+api_token = os.getenv("API_TOKEN")
+print(api_token)
 # Defining stages of the conversation
 GET_USERNAME, GET_PASSWORD, CHECK_LOGIN, LOGGED_IN ,CONFIRM_PASSWORD= range(5)
 # Callback data
@@ -168,9 +173,8 @@ async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await query.answer()
     await query.message.reply_text(text="您已登出教學務系統。")
     return ConversationHandler.END
-
 def main() -> None:
-    application = Application.builder().token("6773799404:AAEsoJaLfWThRU_Acs7GaKYDevS8THjtTF8").build()
+    application = Application.builder().token(api_token).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
