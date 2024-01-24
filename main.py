@@ -127,10 +127,10 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("get_score")
-    filename = "./code/score.json"
-    data=[]
-    with open(filename, 'r', encoding='utf-8') as json_file:
-        data = json.load(json_file)
+    print("logout")
+    global websiteGrab
+    data,websiteGrab = downloadGrade(websiteGrab,"1121")
+    print(data)
     print(data)
     keyboard = [
         [InlineKeyboardButton("回主選單", callback_data=str(LOGOUT))],
@@ -141,13 +141,13 @@ async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return MENU
 
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("logout")
-    data = downloadGrade(websiteGrab,"1121")
+    # print("logout")
+    # data = downloadGrade(websiteGrab,"1121")
     
     # filename = "./code/score.json"
     # with open(filename, 'r', encoding='utf-8') as json_file:
     #     data = json.load(json_file)
-    print(data)
+    # print(data)
 
     query = update.callback_query
     await query.answer()
