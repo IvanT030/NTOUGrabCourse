@@ -159,17 +159,17 @@ def downloadGrade(myWebsite, semester):
             "最終成績": tds[8].get_attribute('innerText')
         }
         data.append(score_data)
-
-    filename = "score.json"
-    with open(filename, 'w', encoding='utf-8') as json_file:
-        json.dump(data, json_file, ensure_ascii=False, indent=4)
+    # score_data = 
+    # filename = "score.json"
+    # with open(filename, 'w+', encoding='utf-8') as json_file:
+    #     json.dump(data, json_file, ensure_ascii=False, indent=4)
 
     myWebsite.switch_to.default_content()
-
-if __name__ == '__main__':
-    loginWebsite = webdriver.Chrome(options= browsereOptions())
-    a, b = login(loginWebsite, '01157132', 'a78874884')
-    print(b)
+    return data
+# if __name__ == '__main__':
+#     loginWebsite = webdriver.Chrome(options= browsereOptions())
+#     a, b = login(loginWebsite, '01157132', 'a78874884')
+#     print(b)
     #downloadGrade(loginWebsite, 1112)
     #--pick course
     #Courses = []

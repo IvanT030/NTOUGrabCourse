@@ -1,6 +1,9 @@
+# -*- coding: utf-8 -*-
 import logging
 import os
 from dotenv import load_dotenv
+import selenium
+from selenium import webdriver
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -12,6 +15,11 @@ from telegram.ext import (
     filters
 )
 
+from code.login import *
+import sys
+sys.stdout.encoding
+sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
+
 # Enable logging
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -20,16 +28,22 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 api_token = os.getenv("API_TOKEN")
-print(api_token)
+
 
 # Defining stages of the conversation
 GET_USERNAME, GET_PASSWORD, SUBMIT_PASSWORD, LOGIN ,CONFIRM_PASSWORD,MENU= range(6)
 # Callback data
-START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD, LOGOUT = range(5)
+START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD,GET_SCORE, LOGOUT = range(6)
 
+def browsereOptions():
+    option = webdriver.ChromeOptions()
+    option.add_argument('headless') #無介面就被這個設定開啟
+    option.add_argument('--start-maximized')
+    option.add_argument('--disable-gpu')
+    option.add_argument('--window-size=1920,1080')  
+    return option
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Send message on `/start`."""
     keyboard = [
         [InlineKeyboardButton("登入教學務系統", callback_data=str(START))]
     ]
@@ -38,14 +52,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return GET_USERNAME
 
 async def get_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Ask for username."""
     query = update.callback_query
     await query.answer()
     await query.message.reply_text(text="請輸入教學務系統帳號：")  # This will replace the original message and remove the buttons
     return GET_PASSWORD
 
 async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Store the username and ask for the password."""
     username = update.message.text.strip()
     context.user_data['username'] = username
 
@@ -58,7 +70,6 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return SUBMIT_PASSWORD
 
 async def submit_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Ask for the password."""
     query = update.callback_query
     await query.answer()
     await query.message.reply_text(text="請輸入教學務系統密碼：")
@@ -76,43 +87,72 @@ async def confirm_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     return LOGIN
 
-async def login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """End the conversation after getting the password."""
+websiteGrab = None
+
+
+async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("username: ", context.user_data['username'])
     print("password: ", context.user_data['password'])
+    # query = update.callback_query
+    # await query.answer()
+    global websiteGrab
+    if update.callback_query:
+        query = update.callback_query
+        global websiteGrab
+        await query.answer()
+        await query.message.reply_text(text="登入資訊已接收，處理中...")
+        loginWebsite = webdriver.Chrome(options= browsereOptions())
+        websiteGrab, ret = login(loginWebsite,str(context.user_data['username']), str(context.user_data['password']))
+
+        # print("return value: ",websiteGrab, ret)
+        return await menu(update, context)  # 调用 menu 函数
+    # else:        
+    #     await update.message.reply_text("登入失敗請重新操作")
+    #     return ConversationHandler.END 
+
+
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    keyboard = [
+        [InlineKeyboardButton("查詢成績", callback_data=str(LOGOUT))],
+        [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     if update.callback_query:
         query = update.callback_query
         await query.answer()
-        keyboard = [
-            [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
-            [InlineKeyboardButton("查詢成績", callback_data=str(LOGOUT))],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        # 使用 edit_message_text 来更新消息内容
-        await query.edit_message_text(text="登入資訊已接收，處理中...")
         await query.edit_message_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
-    elif update.message:
-        # 如果是常规消息，则直接回复
-        await update.message.reply_text("登入資訊已接收，處理中...")
-        # 这里可能需要根据逻辑添加更多的处理代码
-
+    # else:
+    #     await update.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
     return MENU
-async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+
+async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("get_score")
+    filename = "./code/score.json"
+    data=[]
+    with open(filename, 'r', encoding='utf-8') as json_file:
+        data = json.load(json_file)
+    print(data)
     keyboard = [
-        [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
-        [InlineKeyboardButton("查詢成績", callback_data=str(LOGOUT))],
+        [InlineKeyboardButton("回主選單", callback_data=str(LOGOUT))],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.edit_message_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
-   
-    return MENU
-
-async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle logout."""
     query = update.callback_query
     await query.answer()
     await query.message.reply_text(text="您已登出教學務系統。")
-    return ConversationHandler.END
+    return MENU
+
+async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("logout")
+    data = downloadGrade(websiteGrab,"1121")
+    
+    # filename = "./code/score.json"
+    # with open(filename, 'r', encoding='utf-8') as json_file:
+    #     data = json.load(json_file)
+    print(data)
+
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(text="您已登出教學務系統。")
+    return LOGIN
 def main() -> None:
     application = Application.builder().token(api_token).build()
 
@@ -134,11 +174,12 @@ def main() -> None:
             ],
             LOGIN: [
                 CallbackQueryHandler(submit_password, pattern="^" + str(BACK_TO_PASSWORD) + "$"),
-                CallbackQueryHandler(login, pattern="^" + str(CONFIRM_LOGIN) + "$"),
+                CallbackQueryHandler(login_confirm, pattern="^" + str(CONFIRM_LOGIN) + "$"),
             ],
             MENU: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, menu),
-                CallbackQueryHandler(logout, pattern="^" + str(LOGOUT) + "$")
+                CallbackQueryHandler(get_score, pattern="^" + str(GET_SCORE) + "$"),
+                CallbackQueryHandler(logout, pattern="^" + str(LOGOUT) + "$"),
             ]
         },
         fallbacks=[CommandHandler("start", start)]
@@ -147,7 +188,8 @@ def main() -> None:
     application.add_handler(conv_handler)
     application.run_polling()
 
-if __name__ == "__main__":
+if __name__ == "__main__":    
     main()
+
 
 
