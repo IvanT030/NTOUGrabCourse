@@ -3,7 +3,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By as by
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import Select
 import json
 from PIL import Image
 import numpy as np
@@ -24,7 +24,7 @@ def browsereOptions():
     option.add_argument('--window-size=1920,1080')  
     return option
 
-def dealAlert():
+def dealAlert(loginWebsite):
     alert = WebDriverWait(loginWebsite, 1).until(EC.alert_is_present())
     text = alert.text
     alert.accept()
@@ -52,7 +52,7 @@ def login(loginWebsite, account, password):
         loginWebsite.find_element(by.ID, 'M_PW2').send_keys(result.upper())
         loginWebsite.find_element(by.ID, 'LGOIN_BTN').click()
         try: #檢查瀏覽器出現的alert
-            types = dealAlert()
+            types = dealAlert(loginWebsite)
             if types == 2:
                 relogin(loginWebsite)
             elif types == 3:
@@ -82,7 +82,7 @@ def login(loginWebsite, account, password):
     loginWebsite.find_element(by.ID, 'LGOIN_BTN').click()
 
     try: #檢查瀏覽器出現的alert
-        types = dealAlert()
+        types = dealAlert(loginWebsite)
         if types == 2:
             return relogin(loginWebsite)
         elif types == 3:
@@ -91,9 +91,39 @@ def login(loginWebsite, account, password):
             return None, "未知錯誤"
     except:
         return loginWebsite, "登入成功"
-    
-def grabCourse(myWebsite, courseNumbers): #couseNumber多個課號 先當list用
+
+def downloadScedule(myWebsite, semester):
+    year = semester[:3]; sms = semester[3]  
+    menuFrame = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.NAME, 'menuFrame')))
+    myWebsite.switch_to.frame(menuFrame)
+    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt1'))).click()
+    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt30'))).click()
+    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt41'))).click()
+    myWebsite.switch_to.default_content()
+    mainFrame = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.NAME, 'mainFrame')))
+    myWebsite.switch_to.frame(mainFrame)
+    yearSelector = Select(WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.ID, 'Q_AYEAR'))))
+    yearSelector.select_by_value(f'{year}')
+    smsSelector = Select(WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.ID, 'Q_SMS'))))
+    smsSelector.select_by_value(f'{sms}')
+    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'QUERY_BTN3'))).click()
+    time.sleep(0.5)
+    lessons = WebDriverWait(myWebsite, 10).until(EC.presence_of_all_elements_located((by.XPATH, '//*[@id="table2"]/tbody/tr')))
+    scedule = [[],[],[],[],[],[],[],[],[],[],[],[],[],[],[]]
+    for i, rowlessons in enumerate(lessons, start=-1):
+        if i == -1:
+            continue
+        tds = rowlessons.find_elements(by.TAG_NAME, 'td')
+        for td in tds:
+            if td.get_attribute('innerText') == '\xa0':
+                scedule[i].append('None')
+            else:
+                scedule[i].append(td.get_attribute('innerText'))
+    myWebsite.switch_to.default_content()
     myWebsite.refresh()
+    return scedule ,myWebsite
+
+def grabCourse(myWebsite, courseNumbers): #couseNumber多個課號 先當list用
     #菜單按鈕
     #myWebsite.find_element(by.XPATH, '//*[@id="header"]/div[1]/div[1]').click()
     #換框架
@@ -112,14 +142,14 @@ def grabCourse(myWebsite, courseNumbers): #couseNumber多個課號 先當list用
         course_input.clear()
         course_input.send_keys(course)
         submit_btn.click()
-        types = dealAlert()
+        types = dealAlert(myWebsite)
         if types == 0:
             print("選課程出了問題")
 
     myWebsite.switch_to.default_content()
+    myWebsite.refresh()
 
 def downloadGrade(myWebsite, semester):
-    myWebsite.refresh()
     menuFrame = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.NAME, 'menuFrame')))
     myWebsite.switch_to.frame(menuFrame)
     #教務系統
@@ -160,21 +190,28 @@ def downloadGrade(myWebsite, semester):
             "最終成績": tds[8].get_attribute('innerText')
         }
         data.append(score_data)
-    # score_data = 
-    # filename = "score.json"
-    # with open(filename, 'w+', encoding='utf-8') as json_file:
-    #     json.dump(data, json_file, ensure_ascii=False, indent=4)
+
+    average_score = myWebsite.find_element(by.ID, 'M_AVG_MARK').get_attribute('innerText')
+    classRank = myWebsite.find_element(by.ID, 'M_CLASS_RANK').get_attribute('innerText')
+    faculityRank = myWebsite.find_element(by.ID, 'M_FACULTY_RANK').get_attribute('innerText')
+
+    data.append(average_score)
+    data.append(classRank)
+    data.append(faculityRank)
 
     myWebsite.switch_to.default_content()
+    myWebsite.refresh()
     return data, myWebsite
-# if __name__ == '__main__':
-#     loginWebsite = webdriver.Chrome(options= browsereOptions())
-#     a, b = login(loginWebsite, '01157132', 'a78874884')
-#     print(b)
-    #downloadGrade(loginWebsite, 1112)
+
+#if __name__ == '__main__':
+    #loginWebsite = webdriver.Chrome(options= browsereOptions())
+    #a, b = login(loginWebsite, '01157132', 'a78874884')
+    #print(b)
+    #downloadScedule(a,'1111')
     #--pick course
     #Courses = []
     #grabCourse(loginWebsite, Courses)
 
 
 #使用時間逾時, 系統已將您自動登出, 請再重新登入使用本系統!! <== 掛機alert
+#系統同時一次僅許可一個帳號登入，你已登入過系統，請先登出原帳號再登入!
