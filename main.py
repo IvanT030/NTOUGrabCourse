@@ -4,7 +4,8 @@ import os
 from dotenv import load_dotenv
 import selenium
 from selenium import webdriver
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -14,8 +15,9 @@ from telegram.ext import (
     MessageHandler,
     filters
 )
-
+from pyppeteer import launch
 from code.login import *
+from html_content import *
 import sys
 sys.stdout.encoding
 sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
@@ -33,7 +35,7 @@ api_token = os.getenv("API_TOKEN")
 # Defining stages of the conversation
 GET_USERNAME, GET_PASSWORD, SUBMIT_PASSWORD, LOGIN ,CONFIRM_PASSWORD,MENU= range(6)
 # Callback data
-START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD,GET_SCORE, LOGOUT = range(6)
+START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD, GET_SEMESTER,GET_SCORE, LOGOUT = range(7)
 
 def browsereOptions():
     option = webdriver.ChromeOptions()
@@ -91,68 +93,122 @@ websiteGrab = None
 
 
 async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("username: ", context.user_data['username'])
-    print("password: ", context.user_data['password'])
-    # query = update.callback_query
-    # await query.answer()
+    print("login_confirm")
     global websiteGrab
     if update.callback_query:
         query = update.callback_query
-        global websiteGrab
         await query.answer()
         await query.message.reply_text(text="登入資訊已接收，處理中...")
-        loginWebsite = webdriver.Chrome(options= browsereOptions())
-        websiteGrab, ret = login(loginWebsite,str(context.user_data['username']), str(context.user_data['password']))
+        global websiteGrab
+        try:
+            loginWebsite = webdriver.Chrome(options= browsereOptions())
+            websiteGrab, ret = login(loginWebsite,str(context.user_data['username']), str(context.user_data['password']))
+            print("return value: ",websiteGrab, ret)
+            return await menu(update, context)  # 调用 menu 函数
+        except:
+            await update.message.reply_text(text="登入失敗請重新操作")
+            return ConversationHandler.END
 
-        # print("return value: ",websiteGrab, ret)
-        return await menu(update, context)  # 调用 menu 函数
-    # else:        
-    #     await update.message.reply_text("登入失敗請重新操作")
-    #     return ConversationHandler.END 
 
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     keyboard = [
-        [InlineKeyboardButton("查詢成績", callback_data=str(LOGOUT))],
+        [InlineKeyboardButton("查詢成績", callback_data=str(GET_SEMESTER))],
+        [InlineKeyboardButton("查詢課表", callback_data=str(GET_SEMESTER))]
         [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
+
     if update.callback_query:
         query = update.callback_query
         await query.answer()
-        await query.edit_message_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
-    # else:
-    #     await update.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
+        await query.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
+
+    return MENU
+
+async def get_semester(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("get_semester")
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(text="請輸入查詢學期，格式為\"學年\"+\"學期\"，如：1121")
     return MENU
 
 async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("get_score")
-    print("logout")
+    querySem = update.message.text.strip()
+    print("querySem: ",querySem)
+    await update.message.reply_text(text="處理中...")
     global websiteGrab
-    data,websiteGrab = downloadGrade(websiteGrab,"1121")
+    data,websiteGrab = downloadGrade(websiteGrab,querySem)
     print(data)
-    print(data)
+    
+    html_content = scoreTable_head
+    html_content += f"""
+        <h1>{querySem[:3]}學年度 第{querySem[3]}學期 成績單</h1>
+    """
+    html_content += scoreTable_table
+    for item in data:
+        html_content += f"""
+            <tr>
+                <td>{item['課號']}</td>
+                <td>{item['學分']}</td>
+                <td>{item['選別']}</td>
+                <td>{item['課名']}</td>
+                <td>{item['教授']}</td>
+                <td>{item['暫定成績']}</td>
+                <td>{item['最終成績']}</td>
+            </tr>
+        """
+    html_content += """
+        </table>
+        </div>
+    </body>
+    </html>
+    """
+
+    filename = "Myscore.html"
+
+    with open(filename, 'w', encoding='utf-8') as file:
+        file.write(html_content)
+
     keyboard = [
-        [InlineKeyboardButton("回主選單", callback_data=str(LOGOUT))],
+        [InlineKeyboardButton("回主選單", callback_data=str(MENU))],
     ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    path_to_screenshot = './score_schreenshot.png'  # 設定截圖保存路徑
+    await take_screenshot(html_content, path_to_screenshot)
+    await update.message.reply_photo(photo=open(path_to_screenshot, 'rb'))
+    await update.message.reply_text(text="請查看成績", reply_markup=reply_markup)
+    return MENU
+
+async def take_screenshot(html, path_to_save):
+    browser = await launch(headless=True)
+    page = await browser.newPage()
+    await page.setContent(html)
+    await page.screenshot({'path': path_to_save,'fullPage': True})
+    await browser.close()
+
+async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("get_schedule")
+    querySem = update.message.text.strip()
+    print("querySem: ",querySem)
+    await update.message.reply_text(text="處理中...")
+    global websiteGrab
+
+
+    
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text(text="您已登出教學務系統。")
+    await query.message.reply_text(text="請輸入查詢學期，格式為\"學年\"+\"學期\"，如：1121")
     return MENU
 
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    # print("logout")
-    # data = downloadGrade(websiteGrab,"1121")
-    
-    # filename = "./code/score.json"
-    # with open(filename, 'r', encoding='utf-8') as json_file:
-    #     data = json.load(json_file)
-    # print(data)
-
+    print("logout")
     query = update.callback_query
     await query.answer()
     await query.message.reply_text(text="您已登出教學務系統。")
-    return LOGIN
+    return START
 def main() -> None:
     application = Application.builder().token(api_token).build()
 
@@ -177,7 +233,9 @@ def main() -> None:
                 CallbackQueryHandler(login_confirm, pattern="^" + str(CONFIRM_LOGIN) + "$"),
             ],
             MENU: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, menu),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_score),
+                CallbackQueryHandler(get_semester, pattern="^" + str(GET_SEMESTER) + "$"),
+                CallbackQueryHandler(menu, pattern="^" + str(MENU) + "$"),
                 CallbackQueryHandler(get_score, pattern="^" + str(GET_SCORE) + "$"),
                 CallbackQueryHandler(logout, pattern="^" + str(LOGOUT) + "$"),
             ]
