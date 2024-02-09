@@ -33,9 +33,9 @@ api_token = os.getenv("API_TOKEN")
 
 
 # Defining stages of the conversation
-GET_USERNAME, GET_PASSWORD, SUBMIT_PASSWORD, LOGIN ,CONFIRM_PASSWORD,MENU= range(6)
+GET_USERNAME, GET_PASSWORD, SUBMIT_PASSWORD, LOGIN ,CONFIRM_PASSWORD,PROCESS_SEMESTER,MENU= range(7)
 # Callback data
-START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD, GET_SEMESTER,GET_SCORE, LOGOUT = range(7)
+START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD, GET_SEMESTER,GET_SCORE,GET_SCHEDULE, LOGOUT = range(8)
 
 def browsereOptions():
     option = webdriver.ChromeOptions()
@@ -109,18 +109,18 @@ async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             await update.message.reply_text(text="登入失敗請重新操作")
             return ConversationHandler.END
 
-
-
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("menu")
     keyboard = [
-        [InlineKeyboardButton("查詢成績", callback_data=str(GET_SEMESTER))],
-        [InlineKeyboardButton("查詢課表", callback_data=str(GET_SEMESTER))]
+        [InlineKeyboardButton("查詢成績", callback_data=str(GET_SCORE))],
+        [InlineKeyboardButton("查詢課表", callback_data=str(GET_SCHEDULE))],
         [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    if update.callback_query:
-        query = update.callback_query
+    query = update.callback_query
+    print("MENU: query: ",query)
+    if query:
+        # print("query.data: ",query.data)
         await query.answer()
         await query.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
 
@@ -130,24 +130,44 @@ async def get_semester(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     print("get_semester")
     query = update.callback_query
     await query.answer()
+    print("query.data: ",query.data)
+    # 根据用户选择设置action
+    action = query.data  # 假设callback_data直接传递了操作标记
+    context.user_data['action'] = action
     await query.message.reply_text(text="請輸入查詢學期，格式為\"學年\"+\"學期\"，如：1121")
-    return MENU
+    return PROCESS_SEMESTER
 
+async def process_semester(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    semester = update.message.text.strip()
+    print("semester: ",semester)
+    context.user_data['semester'] = semester
+    action = context.user_data.get('action')
+    if action == str(GET_SCORE):
+        return await get_score(update, context)
+    elif action == str(GET_SCHEDULE):
+        return await get_schedule(update, context)
+    else:
+        print("error")
+        return ConversationHandler.END  
+    
 async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("get_score")
-    querySem = update.message.text.strip()
+    querySem = context.user_data['semester']
     print("querySem: ",querySem)
     await update.message.reply_text(text="處理中...")
     global websiteGrab
     data,websiteGrab = downloadGrade(websiteGrab,querySem)
     print(data)
-    
     html_content = scoreTable_head
     html_content += f"""
         <h1>{querySem[:3]}學年度 第{querySem[3]}學期 成績單</h1>
     """
     html_content += scoreTable_table
     for item in data:
+        if not isinstance(item, dict):
+            print("item is not dict")
+            print("item is : ",item)
+            continue  # 如果不是字典，跳过此次循环
         html_content += f"""
             <tr>
                 <td>{item['課號']}</td>
@@ -180,7 +200,7 @@ async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await take_screenshot(html_content, path_to_screenshot)
     await update.message.reply_photo(photo=open(path_to_screenshot, 'rb'))
     await update.message.reply_text(text="請查看成績", reply_markup=reply_markup)
-    return MENU
+    return await menu(update, context) 
 
 async def take_screenshot(html, path_to_save):
     browser = await launch(headless=True)
@@ -191,17 +211,24 @@ async def take_screenshot(html, path_to_save):
 
 async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("get_schedule")
-    querySem = update.message.text.strip()
+    # querySem = update.message.text.strip() 
+    querySem = context.user_data['semester']
     print("querySem: ",querySem)
     await update.message.reply_text(text="處理中...")
     global websiteGrab
-
-
+    data,websiteGrab = downloadSchedule(websiteGrab,querySem)
+    print(data)
     
-    query = update.callback_query
-    await query.answer()
-    await query.message.reply_text(text="請輸入查詢學期，格式為\"學年\"+\"學期\"，如：1121")
-    return MENU
+    keyboard = [
+        [InlineKeyboardButton("回主選單", callback_data=str(MENU))],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    path_to_screenshot = './score_schreenshot.png'  # 設定截圖保存路徑
+    # await take_screenshot(html_content, path_to_screenshot)
+    # await update.message.reply_photo(photo=open(path_to_screenshot, 'rb'))
+    await update.message.reply_text(text="請查看課表", reply_markup=reply_markup)
+    return await menu(update, context) 
 
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("logout")
@@ -232,11 +259,17 @@ def main() -> None:
                 CallbackQueryHandler(submit_password, pattern="^" + str(BACK_TO_PASSWORD) + "$"),
                 CallbackQueryHandler(login_confirm, pattern="^" + str(CONFIRM_LOGIN) + "$"),
             ],
+            PROCESS_SEMESTER: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, process_semester)
+            ],
             MENU: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, get_score),
-                CallbackQueryHandler(get_semester, pattern="^" + str(GET_SEMESTER) + "$"),
                 CallbackQueryHandler(menu, pattern="^" + str(MENU) + "$"),
-                CallbackQueryHandler(get_score, pattern="^" + str(GET_SCORE) + "$"),
+                # MessageHandler(filters.TEXT & ~filters.COMMAND, get_score),
+                # CallbackQueryHandler(get_semester, pattern="^" + str(GET_SCHEDULE) + "$"),
+                # CallbackQueryHandler(get_semester, pattern="^" + str(GET_SCORE) + "$"),
+                CallbackQueryHandler(get_semester, pattern="(^" + str(GET_SCORE) + "$)|(^" + str(GET_SCHEDULE) + "$)"),
+                # CallbackQueryHandler(get_semester, pattern=f"^({str(GET_SCORE)}|{str(GET_SCHEDULE)})$"),
+                # CallbackQueryHandler(get_semester, pattern="^(" + str(GET_SCORE) + "|" + str(GET_SCHEDULE) + ")$"),
                 CallbackQueryHandler(logout, pattern="^" + str(LOGOUT) + "$"),
             ]
         },
@@ -248,6 +281,3 @@ def main() -> None:
 
 if __name__ == "__main__":    
     main()
-
-
-

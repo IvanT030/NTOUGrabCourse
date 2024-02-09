@@ -1,13 +1,23 @@
-#!/usr/bin/env python
-# pylint: disable=unused-argument
-# This program is dedicated to the public domain under the CC0 license.
-
-
 # -*- coding: utf-8 -*-
 import logging
-
-from telegram import ForceReply, Update
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+import os
+from dotenv import load_dotenv
+import selenium
+from selenium import webdriver
+from telegram.constants import ParseMode
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters
+)
+from pyppeteer import launch
+from code.login import *
+from html_content import *
 import sys
 sys.stdout.encoding
 sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
@@ -16,48 +26,230 @@ sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-# set higher logging level for httpx to avoid all GET and POST requests being logged
-logging.getLogger("httpx").setLevel(logging.WARNING)
-
 logger = logging.getLogger(__name__)
 
+load_dotenv()
+api_token = os.getenv("API_TOKEN")
 
-# Define a few command handlers. These usually take the two arguments update and
-# context.
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /start is issued."""
-    user = update.effective_user
-    await update.message.reply_html(
-        rf"Hi {user.mention_html()}!",
-        reply_markup=ForceReply(selective=True),
+
+# Defining stages of the conversation
+GET_USERNAME, GET_PASSWORD, SUBMIT_PASSWORD, LOGIN ,CONFIRM_PASSWORD,MENU= range(6)
+# Callback data
+START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD, GET_SEMESTER,GET_SCORE, LOGOUT = range(7)
+
+def browsereOptions():
+    option = webdriver.ChromeOptions()
+    option.add_argument('headless') #無介面就被這個設定開啟
+    option.add_argument('--start-maximized')
+    option.add_argument('--disable-gpu')
+    option.add_argument('--window-size=1920,1080')  
+    return option
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    keyboard = [
+        [InlineKeyboardButton("登入教學務系統", callback_data=str(START))]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("尚未登入教學務系統，請登入：", reply_markup=reply_markup)
+    return GET_USERNAME
+
+async def get_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(text="請輸入教學務系統帳號：")  # This will replace the original message and remove the buttons
+    return GET_PASSWORD
+
+async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    username = update.message.text.strip()
+    context.user_data['username'] = username
+
+    keyboard = [
+        [InlineKeyboardButton("上一步", callback_data=str(BACK_TO_USERNAME)),
+         InlineKeyboardButton("輸入密碼", callback_data=str(SUBMIT_PASSWORD))]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("若要繼續，點選輸入密碼：", reply_markup=reply_markup)
+    return SUBMIT_PASSWORD
+
+async def submit_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(text="請輸入教學務系統密碼：")
+    return CONFIRM_PASSWORD
+
+async def confirm_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:  
+    password = update.message.text.strip()
+    context.user_data['password'] = password
+    keyboard = [
+        [InlineKeyboardButton("上一步", callback_data=str(BACK_TO_PASSWORD)),
+         InlineKeyboardButton("登入", callback_data=str(CONFIRM_LOGIN))]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("若確定無誤請按登入：", reply_markup=reply_markup)
+
+    return LOGIN
+
+websiteGrab = None
+
+
+async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("login_confirm")
+    global websiteGrab
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.message.reply_text(text="登入資訊已接收，處理中...")
+        global websiteGrab
+        try:
+            loginWebsite = webdriver.Chrome(options= browsereOptions())
+            websiteGrab, ret = login(loginWebsite,str(context.user_data['username']), str(context.user_data['password']))
+            print("return value: ",websiteGrab, ret)
+            return await menu(update, context)  # 调用 menu 函数
+        except:
+            await update.message.reply_text(text="登入失敗請重新操作")
+            return ConversationHandler.END
+
+
+
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    keyboard = [
+        [InlineKeyboardButton("查詢成績", callback_data=str(GET_SEMESTER))],
+        [InlineKeyboardButton("查詢課表", callback_data=str(GET_SEMESTER))]
+        [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        await query.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
+
+    return MENU
+
+async def get_semester(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("get_semester")
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(text="請輸入查詢學期，格式為\"學年\"+\"學期\"，如：1121")
+    return MENU
+
+async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("get_score")
+    querySem = update.message.text.strip()
+    print("querySem: ",querySem)
+    await update.message.reply_text(text="處理中...")
+    global websiteGrab
+    data,websiteGrab = downloadGrade(websiteGrab,querySem)
+    print(data)
+    
+    html_content = scoreTable_head
+    html_content += f"""
+        <h1>{querySem[:3]}學年度 第{querySem[3]}學期 成績單</h1>
+    """
+    html_content += scoreTable_table
+    for item in data:
+        html_content += f"""
+            <tr>
+                <td>{item['課號']}</td>
+                <td>{item['學分']}</td>
+                <td>{item['選別']}</td>
+                <td>{item['課名']}</td>
+                <td>{item['教授']}</td>
+                <td>{item['暫定成績']}</td>
+                <td>{item['最終成績']}</td>
+            </tr>
+        """
+    html_content += """
+        </table>
+        </div>
+    </body>
+    </html>
+    """
+
+    filename = "Myscore.html"
+
+    with open(filename, 'w', encoding='utf-8') as file:
+        file.write(html_content)
+
+    keyboard = [
+        [InlineKeyboardButton("回主選單", callback_data=str(MENU))],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    path_to_screenshot = './score_schreenshot.png'  # 設定截圖保存路徑
+    await take_screenshot(html_content, path_to_screenshot)
+    await update.message.reply_photo(photo=open(path_to_screenshot, 'rb'))
+    await update.message.reply_text(text="請查看成績", reply_markup=reply_markup)
+    return MENU
+
+async def take_screenshot(html, path_to_save):
+    browser = await launch(headless=True)
+    page = await browser.newPage()
+    await page.setContent(html)
+    await page.screenshot({'path': path_to_save,'fullPage': True})
+    await browser.close()
+
+async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("get_schedule")
+    querySem = update.message.text.strip()
+    print("querySem: ",querySem)
+    await update.message.reply_text(text="處理中...")
+    global websiteGrab
+
+
+    
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(text="請輸入查詢學期，格式為\"學年\"+\"學期\"，如：1121")
+    return MENU
+
+async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("logout")
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(text="您已登出教學務系統。")
+    return START
+def main() -> None:
+    application = Application.builder().token(api_token).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            GET_USERNAME: [
+                CallbackQueryHandler(get_username, pattern="^" + str(START) + "$")
+            ],
+            GET_PASSWORD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_password)
+            ],
+            SUBMIT_PASSWORD: [
+                CallbackQueryHandler(get_username, pattern="^" + str(BACK_TO_USERNAME) + "$"),
+                CallbackQueryHandler(submit_password, pattern="^" + str(SUBMIT_PASSWORD) + "$"),
+            ],
+            CONFIRM_PASSWORD:[
+                MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_password),
+            ],
+            LOGIN: [
+                CallbackQueryHandler(submit_password, pattern="^" + str(BACK_TO_PASSWORD) + "$"),
+                CallbackQueryHandler(login_confirm, pattern="^" + str(CONFIRM_LOGIN) + "$"),
+            ],
+            PROCESS_SEMESTER: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, process_semester),
+            ],
+            MENU: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_score),
+                CallbackQueryHandler(get_semester, pattern="^" + str(GET_SEMESTER) + "$"),
+                CallbackQueryHandler(menu, pattern="^" + str(MENU) + "$"),
+                CallbackQueryHandler(get_score, pattern="^" + str(GET_SCORE) + "$"),
+                CallbackQueryHandler(logout, pattern="^" + str(LOGOUT) + "$"),
+            ]
+        },
+        fallbacks=[CommandHandler("start", start)]
     )
 
+    application.add_handler(conv_handler)
+    application.run_polling()
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Send a message when the command /help is issued."""
-    await update.message.reply_text("Help!")
-
-
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Echo the user message."""
-    await update.message.reply_text(update.message.text)
-
-
-def main() -> None:
-    """Start the bot."""
-    # Create the Application and pass it your bot's token.
-    application = Application.builder().token("6773799404:AAEsoJaLfWThRU_Acs7GaKYDevS8THjtTF8").build()
-
-    # on different commands - answer in Telegram
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-
-    # on non command i.e message - echo the message on Telegram
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
-
-    # Run the bot until the user presses Ctrl-C
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-
-# if __name__ == "__main__":
+if __name__ == "__main__":    
     main()
+
+
