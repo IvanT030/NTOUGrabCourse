@@ -16,10 +16,12 @@ scoreTable_head = """
             color: #222222;
         }
         table {
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0;
+            border-radius: 10px;
             width: 100%;
             margin: 30px;
-            border: 2px solid #999999;
+            border: 2px solid #CCCCCC;
         }
         th, td {
             text-align: left;
@@ -36,6 +38,16 @@ scoreTable_head = """
             display: flex;
             margin: 0;
             padding: 0px;
+        }
+        .info-bar {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 30px;
+            margin-bottom: 0px;
+        }
+        .info-item {
+            font-weight: bolder;
+            font-size: 20px;
         }
         </style>
     </head>

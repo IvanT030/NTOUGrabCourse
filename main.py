@@ -35,7 +35,7 @@ api_token = os.getenv("API_TOKEN")
 # Defining stages of the conversation
 GET_USERNAME, GET_PASSWORD, SUBMIT_PASSWORD, LOGIN ,CONFIRM_PASSWORD,PROCESS_SEMESTER,MENU= range(7)
 # Callback data
-START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD, GET_SEMESTER,GET_SCORE,GET_SCHEDULE, LOGOUT = range(8)
+START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD, GET_SEMESTER,GET_SCORE,GET_SCHEDULE, LOGOUT = range(8,16)
 
 def browsereOptions():
     option = webdriver.ChromeOptions()
@@ -112,15 +112,13 @@ async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("menu")
     keyboard = [
-        [InlineKeyboardButton("查詢成績", callback_data=str(GET_SCORE))],
         [InlineKeyboardButton("查詢課表", callback_data=str(GET_SCHEDULE))],
+        [InlineKeyboardButton("查詢成績", callback_data=str(GET_SCORE))],
         [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     query = update.callback_query
-    print("MENU: query: ",query)
     if query:
-        # print("query.data: ",query.data)
         await query.answer()
         await query.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
 
@@ -162,11 +160,27 @@ async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     html_content += f"""
         <h1>{querySem[:3]}學年度 第{querySem[3]}學期 成績單</h1>
     """
+    
+    cnt=0
+    classRank="X"
+    departmentRank="X"
+    semesterAverageGrade="X"
+    if len(data[-1]):
+        departmentRank=data[-1]
+    if len(data[-2]):
+        classRank=data[-2]
+    if len(data[-3]):
+        semesterAverageGrade=data[-3]
+    html_content += f"""
+    <div class="info-bar">
+        <span class="info-item">班排名: {classRank}</span>
+        <span class="info-item">系排名: {departmentRank}</span>
+        <span class="info-item">學期平均成績: {semesterAverageGrade}</span>
+    </div>
+    """
     html_content += scoreTable_table
     for item in data:
         if not isinstance(item, dict):
-            print("item is not dict")
-            print("item is : ",item)
             continue  # 如果不是字典，跳过此次循环
         html_content += f"""
             <tr>
@@ -211,7 +225,6 @@ async def take_screenshot(html, path_to_save):
 
 async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("get_schedule")
-    # querySem = update.message.text.strip() 
     querySem = context.user_data['semester']
     print("querySem: ",querySem)
     await update.message.reply_text(text="處理中...")
@@ -264,12 +277,8 @@ def main() -> None:
             ],
             MENU: [
                 CallbackQueryHandler(menu, pattern="^" + str(MENU) + "$"),
-                # MessageHandler(filters.TEXT & ~filters.COMMAND, get_score),
-                # CallbackQueryHandler(get_semester, pattern="^" + str(GET_SCHEDULE) + "$"),
-                # CallbackQueryHandler(get_semester, pattern="^" + str(GET_SCORE) + "$"),
-                CallbackQueryHandler(get_semester, pattern="(^" + str(GET_SCORE) + "$)|(^" + str(GET_SCHEDULE) + "$)"),
-                # CallbackQueryHandler(get_semester, pattern=f"^({str(GET_SCORE)}|{str(GET_SCHEDULE)})$"),
-                # CallbackQueryHandler(get_semester, pattern="^(" + str(GET_SCORE) + "|" + str(GET_SCHEDULE) + ")$"),
+                CallbackQueryHandler(get_semester, pattern="^" + str(GET_SCORE) + "$"),
+                CallbackQueryHandler(get_semester, pattern="^" + str(GET_SCHEDULE) + "$"),
                 CallbackQueryHandler(logout, pattern="^" + str(LOGOUT) + "$"),
             ]
         },
