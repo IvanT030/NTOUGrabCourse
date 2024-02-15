@@ -37,6 +37,7 @@ GET_USERNAME, GET_PASSWORD, SUBMIT_PASSWORD, LOGIN ,CONFIRM_PASSWORD,PROCESS_SEM
 # Callback data
 START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD, GET_SEMESTER,GET_SCORE,GET_SCHEDULE, LOGOUT = range(8,16)
 
+
 def browsereOptions():
     option = webdriver.ChromeOptions()
     option.add_argument('headless') #無介面就被這個設定開啟
@@ -109,9 +110,11 @@ async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             await update.message.reply_text(text="登入失敗請重新操作")
             return ConversationHandler.END
 
+
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("menu")
     keyboard = [
+
         [InlineKeyboardButton("查詢課表", callback_data=str(GET_SCHEDULE))],
         [InlineKeyboardButton("查詢成績", callback_data=str(GET_SCORE))],
         [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
@@ -121,7 +124,6 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if query:
         await query.answer()
         await query.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
-
     return MENU
 
 async def get_semester(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
