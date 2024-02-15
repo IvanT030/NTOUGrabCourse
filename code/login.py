@@ -92,7 +92,7 @@ def login(loginWebsite, account, password):
     except:
         return loginWebsite, "登入成功"
 
-def downloadScedule(myWebsite, semester):
+def downloadSchedule(myWebsite, semester):
     year = semester[:3]; sms = semester[3]  
     menuFrame = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.NAME, 'menuFrame')))
     myWebsite.switch_to.frame(menuFrame)
@@ -207,7 +207,7 @@ def downloadGrade(myWebsite, semester):
     #loginWebsite = webdriver.Chrome(options= browsereOptions())
     #a, b = login(loginWebsite, '01157132', 'a78874884')
     #print(b)
-    #downloadScedule(a,'1111')
+    #downloadSchedule(a,'1111')
     #--pick course
     #Courses = []
     #grabCourse(loginWebsite, Courses)
