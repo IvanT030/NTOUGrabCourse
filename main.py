@@ -37,6 +37,7 @@ GET_USERNAME, GET_PASSWORD, SUBMIT_PASSWORD, LOGIN ,CONFIRM_PASSWORD,PROCESS_SEM
 # Callback data
 START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD, GET_SEMESTER,GET_SCORE,GET_SCHEDULE, LOGOUT = range(8,16)
 
+GRAB_COURSE, INPUT_COURSE_ID, CHECK_COURSE_ID, CHECK_COURSE_ID_AND_BACK_TO_MENU, BACK_TO_MENU, LOOK_GRAB_COURSE_STATE, EDIT_COURSE_STATE ,DELETE_GRAB_COURSE = range(16,24)
 
 def browsereOptions():
     option = webdriver.ChromeOptions()
@@ -47,6 +48,8 @@ def browsereOptions():
     return option
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data["userID"] = update.message.from_user.id
+    print("user id: ",context.user_data["userID"])
     keyboard = [
         [InlineKeyboardButton("登入教學務系統", callback_data=str(START))]
     ]
@@ -114,9 +117,10 @@ async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("menu")
     keyboard = [
-
         [InlineKeyboardButton("查詢課表", callback_data=str(GET_SCHEDULE))],
         [InlineKeyboardButton("查詢成績", callback_data=str(GET_SCORE))],
+        [InlineKeyboardButton("輸入搶課課號", callback_data=str(INPUT_COURSE_ID))],
+        [InlineKeyboardButton("修改搶課名單", callback_data=str(LOOK_GRAB_COURSE_STATE))],
         [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -156,13 +160,13 @@ async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("querySem: ",querySem)
     await update.message.reply_text(text="處理中...")
     global websiteGrab
-    data,websiteGrab = downloadGrade(websiteGrab,querySem)
+    data,websiteGrab = await downloadGrade(websiteGrab,querySem)
+
     print(data)
     html_content = scoreTable_head
     html_content += f"""
         <h1>{querySem[:3]}學年度 第{querySem[3]}學期 成績單</h1>
     """
-    
     cnt=0
     classRank="X"
     departmentRank="X"
@@ -245,6 +249,127 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await update.message.reply_text(text="請查看課表", reply_markup=reply_markup)
     return await menu(update, context) 
 
+#需要有一個查詢db此user選了多少堂課的function
+targetCourse = dict()
+async def input_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("input_course_id")
+    userID = context.user_data["userID"]
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [InlineKeyboardButton("回主選單", callback_data=str(BACK_TO_MENU))],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if userID not in targetCourse:
+        targetCourse[userID] = []
+    content = f"您已選擇{len(targetCourse[userID])}門課程"
+    if len(targetCourse[userID]) > 4:
+        content += "，可用額度已滿，若需修改搶課名單，請至\"修改搶課名單\"選項修改"
+        await query.edit_message_text(text=content, reply_markup=reply_markup)
+        return await menu(update, context)
+    else:
+        content += f"，還有{4-len(targetCourse[userID])}門課程可選，請輸入搶課課號："
+        await query.edit_message_text(text=content,reply_markup=reply_markup)
+        return GRAB_COURSE
+        
+
+async def confirm_target_course(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("confirm_target_course")
+    targetCourseID = update.message.text.strip()
+    context.user_data['targetCourseID'] = targetCourseID
+    content = f"您已選擇 {targetCourseID}，請繼續以下操作"
+
+    keyboard = [
+        [InlineKeyboardButton("回主選單", callback_data=str(BACK_TO_MENU))]
+    ]
+    if len(targetCourse[update.message.from_user.id]) < 4:
+        keyboard[0].append(InlineKeyboardButton("確認並繼續輸入", callback_data=str(CHECK_COURSE_ID)))
+        keyboard[0].append(InlineKeyboardButton("確認並回主選單", callback_data=str(CHECK_COURSE_ID_AND_BACK_TO_MENU)))
+    elif len(targetCourse[update.message.from_user.id]) == 4:
+        keyboard[0].append(InlineKeyboardButton("確認並回主選單", callback_data=str(CHECK_COURSE_ID_AND_BACK_TO_MENU)))
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(text=content, reply_markup=reply_markup)
+    return GRAB_COURSE
+
+#需要一個檢查課號是否存在的function
+async def check_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("check_course_id") 
+    courseID = context.user_data['targetCourseID']
+    # check if courseID exists
+    userID = context.user_data["userID"]
+    if True:
+        targetCourse[userID].append(courseID)
+    return await input_course_id(update, context)
+
+async def check_course_id_and_back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:  
+    print("check_course_id_and_back_to_menu")
+    courseID = context.user_data['targetCourseID']
+    userID = context.user_data["userID"]
+    # check if courseID exists
+    if True:
+        targetCourse[userID].append(courseID)
+    return await menu(update, context)
+
+async def look_grab_course_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("look_grab_course_state")
+    query = update.callback_query
+    await query.answer()
+    userID = context.user_data["userID"]
+    if userID not in targetCourse:
+        targetCourse[userID] = []
+    if len(targetCourse[userID]) == 0:
+        content = "您尚未選擇任何課程"
+    else:
+        content = "您已選擇的課程如下："
+    keyboard = []
+    print("targetCourse[userID]",targetCourse[userID])
+    for course in targetCourse[userID]:
+        print("course",course)
+        keyboard.append([InlineKeyboardButton(course, callback_data=f"EDIT_COURSE_STATE_{course}"),])
+    keyboard.append([InlineKeyboardButton("回主選單", callback_data=str(BACK_TO_MENU))])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    print("keyboard",keyboard)
+
+    await query.edit_message_text(text=content, reply_markup=reply_markup)
+    return GRAB_COURSE
+
+
+
+#需要一個查詢該課程有沒有搶到的function
+async def edit_course_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("edit_course_state")
+    query = update.callback_query
+    await query.answer()
+    editedCourse = query.data
+    context.user_data["editedCourse"] = editedCourse[18:]
+    print("editedCourse",editedCourse   )
+    courseID = update.callback_query.data
+    userID = context.user_data["userID"]
+
+    #要加上課程有沒有搶到的資訊
+    
+    content = f"您已選擇 {editedCourse[18:]}，請選擇以下操作："
+    keyboard = [
+        [InlineKeyboardButton("刪除此搶課課程", callback_data=str(DELETE_GRAB_COURSE)),
+        InlineKeyboardButton("回主選單", callback_data=str(BACK_TO_MENU))]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.message.reply_text(text=content, reply_markup=reply_markup)
+    return GRAB_COURSE
+
+async def delete_grab_course(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("delete_grab_course")
+    query = update.callback_query
+    await query.answer()
+    userID = context.user_data["userID"]
+    print("context.user_data[editedCourse]",context.user_data["editedCourse"])
+    targetCourse[userID].remove(context.user_data["editedCourse"])
+    await query.message.reply_text(text="已刪除此搶課課程")
+    return await menu(update, context)
+
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("logout")
     query = update.callback_query
@@ -279,10 +404,21 @@ def main() -> None:
             ],
             MENU: [
                 CallbackQueryHandler(menu, pattern="^" + str(MENU) + "$"),
+                CallbackQueryHandler(get_semester, pattern="^" + str(GET_SEMESTER) + "$"),
+                CallbackQueryHandler(input_course_id, pattern="^" + str(INPUT_COURSE_ID) + "$"),
                 CallbackQueryHandler(get_semester, pattern="^" + str(GET_SCORE) + "$"),
                 CallbackQueryHandler(get_semester, pattern="^" + str(GET_SCHEDULE) + "$"),
+                CallbackQueryHandler(look_grab_course_state, pattern="^" + str(LOOK_GRAB_COURSE_STATE) + "$"),
                 CallbackQueryHandler(logout, pattern="^" + str(LOGOUT) + "$"),
-            ]
+            ],
+            GRAB_COURSE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_target_course),
+                CallbackQueryHandler(menu, pattern="^" + str(BACK_TO_MENU) + "$"),
+                CallbackQueryHandler(check_course_id, pattern="^" + str(CHECK_COURSE_ID) + "$"),
+                CallbackQueryHandler(check_course_id_and_back_to_menu, pattern="^" + str(CHECK_COURSE_ID_AND_BACK_TO_MENU) + "$"),
+                CallbackQueryHandler(edit_course_state, pattern="^" + "EDIT_COURSE_STATE_" ),
+                CallbackQueryHandler(delete_grab_course, pattern="^" + str(DELETE_GRAB_COURSE) + "$"),
+            ],
         },
         fallbacks=[CommandHandler("start", start)]
     )
