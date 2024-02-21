@@ -159,7 +159,7 @@ async def downloadSchedule(page, semester):
     await mainFrame.select('#Q_SMS', sms)
     await mainFrame.waitForSelector('#QUERY_BTN3')
     await mainFrame.click('#QUERY_BTN3')
-    await asyncio.sleep(10)
+    await asyncio.sleep(3)
 
     table_content = await mainFrame.evaluate('''() => {
         const table = document.querySelector("#table2");
@@ -170,7 +170,7 @@ async def downloadSchedule(page, semester):
         });
     }''')
     #print(table_content)
-    await page.refresh()
+    await page.reload()
     return table_content, page
 
 def grabCourse(myWebsite, courseNumbers): #couseNumber多個課號 先當list用
@@ -199,59 +199,59 @@ def grabCourse(myWebsite, courseNumbers): #couseNumber多個課號 先當list用
     myWebsite.switch_to.default_content()
     myWebsite.refresh()
 
-def downloadGrade(myWebsite, semester):
-    menuFrame = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.NAME, 'menuFrame')))
-    myWebsite.switch_to.frame(menuFrame)
-    #教務系統
-    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt1'))).click()
-    #成績系統
-    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt31'))).click()
-    #查詢各式成績#
-    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt39'))).click()
-    myWebsite.switch_to.default_content()
-    mainFrame = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.NAME, 'mainFrame')))
-    myWebsite.switch_to.frame(mainFrame)
-    #學年期
-    semester_input = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.ID, 'Q_AYEARSMS')))
-    semester_input.clear()
-    semester_input.send_keys(semester)
-    #查詢button
-    myWebsite.find_element(by.ID, 'QUERY_BTN1').click()
-    #成績表
-    myWebsite.switch_to.default_content()
-    viewFrame = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.NAME, 'viewFrame')))
-    myWebsite.switch_to.frame(viewFrame)
-    trs = WebDriverWait(myWebsite, 20).until(
-        EC.presence_of_all_elements_located((by.XPATH, '//*[@id="DataGrid"]/tbody/tr'))
-    )
+async def downloadGrade(page, semester):
+    await asyncio.sleep(3)
+    menuFrame = None; mainFrame = None; viewFrame = None
+    frames = page.frames
+    for frame in frames:
+        if frame.name == 'menuFrame':
+            menuFrame = frame
+        elif frame.name == 'mainFrame':
+            mainFrame = frame 
+        elif frame.name == 'viewFrame':
+            viewFrame = frame
+    await menuFrame.waitForSelector('#Menu_TreeViewt1')
+    await menuFrame.click('#Menu_TreeViewt1')
+    await menuFrame.waitForSelector('#Menu_TreeViewt32')
+    await menuFrame.click('#Menu_TreeViewt32')
+    await menuFrame.waitForSelector('#Menu_TreeViewt40')
+    await menuFrame.click('#Menu_TreeViewt40')
+
+    await asyncio.sleep(4)
+    await mainFrame.evaluate(f"""() => {{
+        document.getElementById('Q_AYEARSMS').value = '{semester}';
+    }}""")
+    await mainFrame.waitForSelector('#QUERY_BTN1')
+    await mainFrame.click('#QUERY_BTN1')
+    await asyncio.sleep(2)
+
+    trs = await viewFrame.querySelectorAll('#DataGrid tbody tr')
     data = []
-    # 現在gradeTable應該包含所有的<tr>元素
+    # 現在trs應該包含所有的<tr>元素
     for i, tr in enumerate(trs):
-        if i == 0 :
+        if i == 0:
             continue
-        tds = tr.find_elements(by.TAG_NAME, 'td')
+        tds = await tr.querySelectorAll('td')
         score_data = {
-            "課號": tds[1].get_attribute('innerText'),
-            "學分": tds[3].get_attribute('innerText'),
-            "選別": tds[4].get_attribute('innerText'),
-            "課名": tds[5].get_attribute('innerText'),
-            "教授": tds[6].get_attribute('innerText'),
-            "暫定成績": tds[7].get_attribute('innerText'),
-            "最終成績": tds[8].get_attribute('innerText')
+            "課號": await (await tds[1].getProperty('innerText')).jsonValue(),
+            "學分": await (await tds[3].getProperty('innerText')).jsonValue(),
+            "選別": await (await tds[4].getProperty('innerText')).jsonValue(),
+            "課名": await (await tds[5].getProperty('innerText')).jsonValue(),
+            "教授": await (await tds[6].getProperty('innerText')).jsonValue(),
+            "暫定成績": await (await tds[7].getProperty('innerText')).jsonValue(),
+            "最終成績": await (await tds[8].getProperty('innerText')).jsonValue()
         }
         data.append(score_data)
 
-    average_score = myWebsite.find_element(by.ID, 'M_AVG_MARK').get_attribute('innerText')
-    classRank = myWebsite.find_element(by.ID, 'M_CLASS_RANK').get_attribute('innerText')
-    faculityRank = myWebsite.find_element(by.ID, 'M_FACULTY_RANK').get_attribute('innerText')
+    average_score = await viewFrame.querySelectorEval('#M_AVG_MARK', 'node => node.innerText')
+    classRank = await viewFrame.querySelectorEval('#M_CLASS_RANK', 'node => node.innerText')
+    faculityRank = await viewFrame.querySelectorEval('#M_FACULTY_RANK', 'node => node.innerText')
 
     data.append(average_score)
     data.append(classRank)
     data.append(faculityRank)
 
-    myWebsite.switch_to.default_content()
-    myWebsite.refresh()
-    return data, myWebsite
+    return data, page
 
 # async def main():
 #     a, b = await login('01157132','R125179001')
