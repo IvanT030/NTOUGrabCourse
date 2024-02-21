@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
+import asyncio
 from dotenv import load_dotenv
 import selenium
 from selenium import webdriver
@@ -93,21 +94,24 @@ async def confirm_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     return LOGIN
 
-websiteGrab = None
+user={}
+
+
 
 
 async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("login_confirm")
-    global websiteGrab
+    global user
     if update.callback_query:
         query = update.callback_query
         await query.answer()
         await query.message.reply_text(text="登入資訊已接收，處理中...")
         global websiteGrab
         try:
-            loginWebsite = webdriver.Chrome(options= browsereOptions())
-            websiteGrab, ret = login(loginWebsite,str(context.user_data['username']), str(context.user_data['password']))
-            print("return value: ",websiteGrab, ret)
+            # websiteGrab, state = await login(context.user_data['username'], context.user_data['password'])
+            # user[context.user_data["userID"]] = websiteGrab
+            # print("return value: ",websiteGrab, state)
+            await asyncio.sleep(7)
             return await menu(update, context)  # 调用 menu 函数
         except:
             await update.message.reply_text(text="登入失敗請重新操作")
@@ -235,9 +239,8 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     print("querySem: ",querySem)
     await update.message.reply_text(text="處理中...")
     global websiteGrab
-    data,websiteGrab = downloadSchedule(websiteGrab,querySem)
+    data,websiteGrab = await downloadSchedule(user[context.user_data["userID"]],querySem)
     print(data)
-    
     keyboard = [
         [InlineKeyboardButton("回主選單", callback_data=str(MENU))],
     ]

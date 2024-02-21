@@ -25,7 +25,7 @@ async def handleDialog(dialog):
     elif text == '帳號或密碼錯誤，請查明後再登入，若您不確定密碼，請執行忘記密碼，取得新密碼後再登入!':
         msn = 3
     await dialog.dismiss()
-    
+
 async def login(account, password): 
     global msn
     browser = await launch(headless=False,
@@ -36,7 +36,9 @@ async def login(account, password):
     await loginWebsite.setViewport({'width': 1920, 'height': 1080})
     async def relogin(loginWebsite):
         global msn
+        await loginWebsite.waitForSelector('#M_PW')
         await loginWebsite.type('#M_PW', password)
+        await loginWebsite.waitForSelector('#importantImg')
         captcha = await loginWebsite.waitForSelector('#importantImg')
         await captcha.screenshot({'path': r'C:\GitHub\NTOUGrabCourse\code\captcha.png'})
         img = Image.open('code/captcha.png')
@@ -46,7 +48,9 @@ async def login(account, password):
             result = ocr.classification(img)
             print(result)
             match = re.match(r'^[a-zA-Z0-9]{4}$', result)
+        await loginWebsite.waitForSelector('#M_PW2')
         await loginWebsite.type('#M_PW2', result.upper())
+        await loginWebsite.waitForSelector('#LGOIN_BTN')
         loginButton = await loginWebsite.querySelector('#LGOIN_BTN')
         await loginButton.click()
         await asyncio.sleep(1)
@@ -59,6 +63,45 @@ async def login(account, password):
             return None, "帳密出錯"
         else:    
             return None, "未知錯誤"
+        
+    await loginWebsite.goto('https://ais.ntou.edu.tw/Default.aspx') 
+    #輸入帳號
+    await loginWebsite.waitForSelector('#M_PORTAL_LOGIN_ACNT')
+    await loginWebsite.type('#M_PORTAL_LOGIN_ACNT', account)
+    await loginWebsite.waitForSelector('#M_PW')
+    await loginWebsite.type('#M_PW', password)
+    await loginWebsite.waitForSelector('#importantImg')
+    captcha = await loginWebsite.waitForSelector('#importantImg')
+    await captcha.screenshot({'path': r'C:\GitHub\NTOUGrabCourse\code\captcha.png'})
+    img = Image.open('code/captcha.png')
+   
+    pattern = r'^[a-zA-Z0-9]{4}$'
+    match = False
+    result = ''
+
+    while not match:
+        ocr = ddddocr.DdddOcr()
+        result = ocr.classification(img) 
+        print(result)
+        match = re.match(pattern, result)
+
+    await loginWebsite.waitForSelector('#M_PW2')
+    await loginWebsite.type('#M_PW2', result.upper())
+    await loginWebsite.waitForSelector('#LGOIN_BTN')
+    loginButton = await loginWebsite.querySelector('#LGOIN_BTN')
+    await loginButton.click()
+    await asyncio.sleep(1)
+    tmp = msn; msn = -1
+    if tmp == -1:
+        return loginWebsite, "登入成功"
+    elif tmp == 2:
+        return await relogin(loginWebsite)
+    elif tmp == 3:
+        browser.close()
+        return None, "帳密出錯"
+    else:    
+        browser.close()
+        return None, "未知錯誤"
         
     await loginWebsite.goto('https://ais.ntou.edu.tw/Default.aspx') 
     #輸入帳號
@@ -94,7 +137,7 @@ async def login(account, password):
         browser.close()
         return None, "未知錯誤"
 
-async def downloadScedule(page, semester):
+async def downloadSchedule(page, semester):
     year = semester[:3]; sms = semester[3]  
     await asyncio.sleep(1.5)
     menuFrame = None; mainFrame = None
@@ -210,11 +253,11 @@ def downloadGrade(myWebsite, semester):
     myWebsite.refresh()
     return data, myWebsite
 
-async def main():
-    a, b = await login('01157132','R125179001')
-    await downloadScedule(a, '1112')
+# async def main():
+#     a, b = await login('01157132','R125179001')
+#     await downloadScedule(a, '1112')
 
-asyncio.get_event_loop().run_until_complete(main())
+# asyncio.get_event_loop().run_until_complete(main())
 
 #使用時間逾時, 系統已將您自動登出, 請再重新登入使用本系統!! <== 掛機alert
 #系統同時一次僅許可一個帳號登入，你已登入過系統，請先登出原帳號再登入!
