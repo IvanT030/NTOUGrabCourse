@@ -1,12 +1,11 @@
 #python 3.11
 import asyncio
 from pyppeteer import launch
-from pyppeteer import dialog
 from PIL import Image
-import io
 import ddddocr
 import re
-import time
+import sqlite3
+import aiosqlite
 
 fail_types = ('未找到課程','課程不可選','選取失敗','人數已達上限','系統錯誤','年級不可加選！','衝堂不可選！')
 success_types = ('本科目設有檢查人數下限。選本課程，在未達下限人數前時無法退選，確定加選?', '成功選取')
@@ -26,12 +25,19 @@ async def handleDialog(dialog):
         msn = 3
     await dialog.dismiss()
     
+#改成browser回傳，其他函式改browser接收
 async def login(account, password): 
     global msn
-    browser = await launch(headless=False,
+    browser = await launch(headless=True,
                            dumpio=True,
-                           args=[f'--window-size={1920},{1080}'])
-    loginWebsite = await browser.newPage()
+                           args=[f'--window-size={1920},{1080}',
+                               '--disable-features=TranslateUI', 
+                               '--no-sandbox'],
+                            handleSIGINT=False, #讓pyppeteer可以在thread運行
+                            handleSIGTERM=False,
+                            handleSIGHUP=False)
+    all_pages = await browser.pages()
+    loginWebsite = all_pages[0]
     loginWebsite.on('dialog', lambda dialog: asyncio.ensure_future(handleDialog(dialog)))
     await loginWebsite.setViewport({'width': 1920, 'height': 1080})
     async def relogin(loginWebsite):
@@ -84,7 +90,7 @@ async def login(account, password):
     await asyncio.sleep(1)
     tmp = msn; msn = -1
     if tmp == -1:
-        return loginWebsite, "登入成功"
+        return browser, "登入成功"
     elif tmp == 2:
         return await relogin(loginWebsite)
     elif tmp == 3:
@@ -94,7 +100,9 @@ async def login(account, password):
         browser.close()
         return None, "未知錯誤"
 
-async def downloadScedule(page, semester):
+async def downloadScedule(browser, semester):
+    all_pages = await browser.pages()
+    page = all_pages[0]
     year = semester[:3]; sms = semester[3]  
     await asyncio.sleep(1.5)
     menuFrame = None; mainFrame = None
@@ -128,39 +136,19 @@ async def downloadScedule(page, semester):
     }''')
     #print(table_content)
     await page.reload()
-    return table_content, page
+    return table_content, browser
 
-def grabCourse(myWebsite, courseNumbers): #couseNumber多個課號 先當list用
-    #菜單按鈕
-    #myWebsite.find_element(by.XPATH, '//*[@id="header"]/div[1]/div[1]').click()
-    #換框架
-    myWebsite.switch_to.frame(myWebsite.find_element(by.NAME, 'menuFrame'))
-    #教務系統
-    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt1'))).click()
-    #選課系統按鈕
-    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt30'))).click()
-    #線上即時加退選按鈕
-    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt40'))).click()
-    #以下尚未測試 尋找課號input
-    course_input = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.ID, 'Q_COSID')))
-    submit_btn = myWebsite.find_element(by.ID, 'QUERY_COSID_BTN')
-    
-    for course in courseNumbers:
-        course_input.clear()
-        course_input.send_keys(course)
-        submit_btn.click()
-        types = dealAlert(myWebsite)
-        if types == 0:
-            print("選課程出了問題")
-
-    myWebsite.switch_to.default_content()
-    myWebsite.refresh()
-
-async def downloadGrade(page, semester):
+async def downloadGrade(browser, semester):
+    all_pages = await browser.pages()
+    page = all_pages[0]
     await asyncio.sleep(3)
     menuFrame = None; mainFrame = None; viewFrame = None
+    await page.waitForSelector('#menuIFrame')
+    await page.waitForSelector('#mainIFrame')
+    await page.waitForSelector('#viewIFrame')
     frames = page.frames
     for frame in frames:
+        print(frame.name)
         if frame.name == 'menuFrame':
             menuFrame = frame
         elif frame.name == 'mainFrame':
@@ -208,12 +196,80 @@ async def downloadGrade(page, semester):
     data.append(classRank)
     data.append(faculityRank)
 
+    await page.reload()
+    return data, browser
+
+async def userCourses(account):
+    courses = []
+    async with aiosqlite.connect('userCourse.db') as conn:
+        async with conn.execute('SELECT courses FROM userData WHERE account = ?', (account,)) as cursor:
+            result = cursor.fetchone()
+            if result:
+                courses_data = result[0]
+                courses = courses_data.split(',')
+                print(f"Courses for account '{account}': {courses_data}")
+            else:
+                print(f"Account '{account}' not found.")
+
+    return courses
+
+async def searchCourse(browser, course):
+    all_pages = await browser.pages()
+    page = all_pages[0]
+    await asyncio.sleep(2.5)
+    await page.waitForSelector('#menuIFrame')
+    await page.waitForSelector('#mainIFrame')
+    menuFrame = None; mainFrame = None
+    frames = page.frames
+    for frame in frames:
+        if frame.name == 'menuFrame':
+            menuFrame = frame
+        elif frame.name == 'mainFrame':
+            mainFrame = frame 
+    await menuFrame.waitForSelector('#Menu_TreeViewt1')
+    await menuFrame.click('#Menu_TreeViewt1')
+    await menuFrame.waitForSelector('#Menu_TreeViewt31')
+    await menuFrame.click('#Menu_TreeViewt31')
+    await menuFrame.waitForSelector('#Menu_TreeViewt40')
+    await menuFrame.click('#Menu_TreeViewt40')
+    await asyncio.sleep(1.5)
+    await mainFrame.waitForSelector('#Q_CH_LESSON')
+    await mainFrame.evaluate(f"""() => {{document.getElementById('Q_CH_LESSON').value = '{course}';}}""")
+    await mainFrame.waitForSelector('#QUERY_BTN7')
+    await mainFrame.click('#QUERY_BTN7')
+
+    await mainFrame.waitForSelector('#DataGrid tbody tr')
+    trs = await mainFrame.querySelectorAll('#DataGrid tbody tr')
+    data = []
+    # 現在trs應該包含所有的<tr>元素
+    for i, tr in enumerate(trs):
+        if i == 0:
+            continue
+        tds = await tr.querySelectorAll('td')
+        td_innerText = {
+            "課號": await (await tds[2].getProperty('innerText')).jsonValue(),
+            "課名": await (await tds[3].getProperty('innerText')).jsonValue(),
+            "開課單位": await (await tds[4].getProperty('innerText')).jsonValue(),
+            "年級班別": await (await tds[5].getProperty('innerText')).jsonValue(),
+            "教授": await (await tds[6].getProperty('innerText')).jsonValue(),
+            "是否英文": await (await tds[8].getProperty('innerText')).jsonValue(),
+            "學分": await (await tds[9].getProperty('innerText')).jsonValue(),
+            "選別": await (await tds[10].getProperty('innerText')).jsonValue(),
+            "人數上下限": await (await tds[12].getProperty('innerText')).jsonValue(),
+            "實習": await (await tds[13].getProperty('innerText')).jsonValue(),
+            "期限": await (await tds[16].getProperty('innerText')).jsonValue()
+        }
+        data.append(td_innerText)
+    print(data)
+    await page.reload()
     return data, page
 
+userWeb = {}
 async def main():
-    a, b = await login('01157132','R125179001')
-    a,b = await downloadGrade(a, '1112')
-    print(a)
+    a, _ = await login('01157132', 'R125179001')
+    await downloadGrade(a, '1112')
+    await a.close()
+    
 
 asyncio.get_event_loop().run_until_complete(main())
 
