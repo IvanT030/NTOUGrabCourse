@@ -13,6 +13,15 @@ fail_types = ('未找到課程','課程不可選','選取失敗','人數已達�
 success_types = ('本科目設有檢查人數下限。選本課程，在未達下限人數前時無法退選，確定加選?', '成功選取')
 msn = -1
 
+async def findFrameByName(page, frameName):
+    def frameExists(page, name):
+        return name in [frame.name for frame in page.frames]
+    while not frameExists(page, frameName):
+        await asyncio.sleep(0.1)  
+    for frame in page.frames:
+        if frame.name == frameName:
+            return frame
+
 async def waitForSelectorOrTimeout(frame, selector, timeout=30000):
     try:
         await frame.waitForSelector(selector, {'visible': True})
@@ -20,6 +29,7 @@ async def waitForSelectorOrTimeout(frame, selector, timeout=30000):
     except TimeoutError:
         print(f"Timeout while waiting for {selector}")
         return False
+    
 async def handleDialog(dialog):
     global msn
     text = dialog.message
@@ -37,7 +47,8 @@ async def handleDialog(dialog):
 #改成browser回傳，其他函式改browser接收
 async def login(account, password): 
     global msn
-    browser = await launch(headless=True,
+    browser = await launch(slowMo=10,
+                           headless=False,
                            dumpio=True,
                            args=[f'--window-size={1920},{1080}',
                                '--disable-features=TranslateUI', 
@@ -49,8 +60,11 @@ async def login(account, password):
     loginWebsite = all_pages[0]
     loginWebsite.on('dialog', lambda dialog: asyncio.ensure_future(handleDialog(dialog)))
     await loginWebsite.setViewport({'width': 1920, 'height': 1080})
-    async def relogin(loginWebsite):
+    async def relogin(browser):
         global msn
+        all_pages = await browser.pages()
+        loginWebsite = all_pages[0]
+        loginWebsite.on('dialog', lambda dialog: asyncio.ensure_future(handleDialog(dialog)))
         await loginWebsite.waitForSelector('#M_PW')
         await loginWebsite.type('#M_PW', password)
         await loginWebsite.waitForSelector('#importantImg')
@@ -71,12 +85,14 @@ async def login(account, password):
         await asyncio.sleep(1)
         tmp = msn; msn = -1
         if tmp == -1:
-            return loginWebsite, "登入成功"
+            return browser, "登入成功"
         elif tmp == 2:
-            return await relogin(loginWebsite)
+            return await relogin(browser)
         elif tmp == 3:
+            await browser.close()
             return None, "帳密出錯"
         else:    
+            await browser.close()
             return None, "未知錯誤"
         
     await loginWebsite.goto('https://ais.ntou.edu.tw/Default.aspx') 
@@ -110,12 +126,14 @@ async def login(account, password):
     if tmp == -1:
         return browser, "登入成功"
     elif tmp == 2:
-        return await relogin(loginWebsite)
+        return await relogin(browser)
     elif tmp == 3:
-        browser.close()
+        print(account,'關掉')
+        await browser.close()
         return None, "帳密出錯"
-    else:    
-        browser.close()
+    else:  
+        print(account,'關掉')  
+        await browser.close()
         return None, "未知錯誤"
      
 
@@ -162,10 +180,6 @@ async def downloadGrade(browser, semester):
     all_pages = await browser.pages()
     page = all_pages[0]
     await asyncio.sleep(3)
-
-
-
-
     menuFrame = None; mainFrame = None; viewFrame = None
     await page.waitForSelector('#menuIFrame')
     await page.waitForSelector('#mainIFrame')
@@ -335,7 +349,7 @@ async def main():
     await a.close()
     
 
-asyncio.get_event_loop().run_until_complete(main())
+#asyncio.get_event_loop().run_until_complete(main())
 
 #使用時間逾時, 系統已將您自動登出, 請再重新登入使用本系統!! <== 掛機alert
 #系統同時一次僅許可一個帳號登入，你已登入過系統，請先登出原帳號再登入!

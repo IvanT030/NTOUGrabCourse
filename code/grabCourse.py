@@ -1,14 +1,15 @@
 from login import login
+from login import waitForSelectorOrTimeout
+from login import findFrameByName
 import asyncio
 import aiosqlite
 import sqlite3
 import threading
 from pyppeteer import launch
-import queue
 #courses字串:'哪節:狀態,哪節:狀態' 狀態分成0(還沒搶)，1(正在搶)(防止同時讀檔案的race condition)，2(搶玩了)
 
 
-maxThread = 2
+maxThread = 99
 currentThread = 0
 
 maxBrowser = 5
@@ -35,21 +36,23 @@ async def getTask():
             conn.commit()
             cursor.close()
             conn.close()
-        await asyncio.sleep(4)
+        await asyncio.sleep(1)
 
-async def doTask():
+async def doTask(): #太久沒有接任務可以做成怠速模式
     global currentThread
     global task_queue
     endLoginTasks = asyncio.Queue()
     while True:
         try:
-            #(browser,"...",account)
+            #snipeCourseValue = (browser,"...",account,course,(which)不一定)<=tuple
             snipeCourseValue = endLoginTasks.get_nowait() 
-            print('find : ', snipeCourseValue)
-            logThread = threading.Thread(target= 
-                    lambda: asyncio.run(endLoginTasks.put(asyncio.run(login(task[0], task[1])) + (account,))))
-            currentThread -= 1
-            #await snapCourse()
+            if snipeCourseValue[0] == None:
+                currentThread -= 1
+                continue
+            print('start : ', snipeCourseValue)
+            snipeThread = threading.Thread(target= 
+                    lambda: asyncio.run(snipeCourse(snipeCourseValue[0], snipeCourseValue[3])))#, snipeCourseValue[4])
+            snipeThread.start()
         except asyncio.QueueEmpty:
             #print('end login task is empty! :))')
             pass
@@ -58,42 +61,39 @@ async def doTask():
             account = task[0]
             if account not in userWeb:
                 logThread = threading.Thread(target= 
-                    lambda: asyncio.run(endLoginTasks.put(asyncio.run(login(task[0], task[1])) + (account,))))
+                    lambda: asyncio.run(endLoginTasks.put(asyncio.run(login(task[0], task[1])) + (account, task[2]))))
                 logThread.start()
                 print(account + 'start login')
         except asyncio.QueueEmpty:
             #print('task queue is empty! :)))')
             pass
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)
 
 #which處理多個相同課號的
-async def snipeCourse(browser, course, which):
+async def snipeCourse(browser, course):
     global currentThread
     all_pages = await browser.pages()
     page = all_pages[0]
-    await asyncio.sleep(2.5)
-    await page.waitForSelector('#menuIFrame')
-    await page.waitForSelector('#mainIFrame')
     menuFrame = None; mainFrame = None
-    frames = page.frames
-    for frame in frames:
-        if frame.name == 'menuFrame':
-            menuFrame = frame
-        elif frame.name == 'mainFrame':
-            mainFrame = frame 
-    await menuFrame.waitForSelector('#Menu_TreeViewt1')
-    await menuFrame.click('#Menu_TreeViewt1')
-    await menuFrame.waitForSelector('#Menu_TreeViewt31')
-    await menuFrame.click('#Menu_TreeViewt31')
-    await menuFrame.waitForSelector('#Menu_TreeViewt41')
-    await menuFrame.click('#Menu_TreeViewt41')
+    menuFrame = await findFrameByName(page, 'menuFrame')
+    mainFrame = await findFrameByName(page, 'mainFrame')
 
-    await asyncio.sleep(3)
-    await mainFrame.evaluate(f"""() => {{document.getElementById('Q_COSID').value = '{course}';}}""")
-    await mainFrame.waitForSelector('#QUERY_COSID_BTN')
-    await mainFrame.click('#QUERY_COSID_BTN')
+    selectors_and_frames = [
+        (menuFrame, '#Menu_TreeViewt1'),
+        (menuFrame, '#Menu_TreeViewt31'),
+        (menuFrame, '#Menu_TreeViewt41'),
+        (mainFrame, '#Q_COSID'),
+        (mainFrame, '#QUERY_COSID_BTN')
+    ]
 
+    for frame, selector in selectors_and_frames:
+        if await waitForSelectorOrTimeout(frame, selector):
+            await frame.click(selector)
+
+    print('temprorary test')
     currentThread -= 1
+    await asyncio.sleep(10)
+    await browser.close()
     
 
 
