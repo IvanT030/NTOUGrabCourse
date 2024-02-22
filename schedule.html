@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <title>課程表</title>
+<style>
+    @font-face {
+        font-family: 'GenSenRounded-M';
+        src:  url('GenSenRounded-M.ttc') format("truetype"); 
+    }
+    body {
+        font-family: 'GenSenRounded-M',Arial, sans-serif;
+        /* font-weight: 600; */
+        background-color: #eeeeee;
+    }
+    table {
+        width: 1500px;
+        height: 90dvh;
+        border-collapse: separate;
+        border-spacing: 6px;
+        /* 調整間距 */
+        
+        table-layout: fixed;
+        /* 使每列寬度一致 */
+    }
+    th,td {
+        /* height: 105px; */
+        padding: 12px;
+        text-align:center;
+        font-size: 15px;
+        /* 統一格子的高度 */
+    }
+    th {
+        font-size: 15px;
+        background-color: transparent;
+        /* 標題無背景色 */
+    }
+    .class-cell {
+        background-color: rgba(2, 2, 2, 0.74);
+        /* 半透明淺黑色背景 */
+        border-radius: 30px;
+        color: rgba(255, 255, 255, 0.925);
+    }
+    .no-class {
+        background-color: transparent;
+        /* 無課程無背景色 */
+    }
+</style>
+</head>
+
+<body>
+
+
+    <table id="schedule">
+    </table>
+
+    <script>
+        // 定義課程表數據
+        const scheduleData = [
+                ['\xa0\t', '星期一\t', '星期二\t', '星期三\t', '星期四\t', '星期五\t', '星期六\t', '星期日'],
+                ['第0節\n06:20~08:10\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0'],
+                ['第一節\n08:20~09:10\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0'],
+                ['第二節\n09:20~10:10\t', '機器學習\nM5701T8K\n資訊工程學系碩士班\n1A\nINS303\n\n\t', '\xa0\t', '演算法\nB5702P98\n資訊工程學系\n2B\nINS101\n\n\t', '電腦網路\nB5702P36\n資訊工程學系\n2B\nECGB107\n\n\t', '\xa0\t', '高階程式競賽技巧\nB570258M\n資訊工程學系\n2B\nINS203\n\n\t', '\xa0'],
+                ['第三節\n10:20~11:10\t', '機器學習\nM5701T8K\n資訊工程學系碩士班\n1A\nINS303\n\n\t', '\xa0\t', '演算法\nB5702P98\n資訊工程學系\n2B\nINS101\n\n\t', '電腦網路\nB5702P36\n資訊工程學系\n2B\nECGB107\n\n\t', '人生哲學 (經典)\nB9M014IA\n共同教育中心博雅教育組\n1A\nTEC1102\n\n\t', '高階程式競賽技巧\nB570258M\n資訊工程學系\n2B\nINS203\n\n\t', '\xa0'],
+                ['第四節\n11:15~12:05\t', '機器學習\nM5701T8K\n資訊工程學系碩士班\n1A\nINS303\n\n\t', '\xa0\t', '演算法\nB5702P98\n資訊工程學系\n2B\nINS101\n\n\t', '電腦網路\nB5702P36\n資訊工程學系\n2B\nECGB107\n\n\t', '人生哲學 (經典)\nB9M014IA\n共同教育中心博雅教育組\n1A\nTEC1102\n\n\t', '高階程式競賽技巧\nB570258M\n資訊工程學系\n2B\nINS203\n\n\t', '\xa0'],
+                ['第五節\n12:10~13:00\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0'], 
+                ['第六節\n13:10~14:00\t', 'MATLAB 程式設計\nB57021Y4\n資訊工程學系\n2A\nINS301\n\n\t', '\xa0\t', 'JAVA程式設計\nB5702009\n資訊工程學系\n2A\nINS203\n\n\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0'],
+                ['第七節\n14:10~15:00\t', 'MATLAB 程式設計\nB57021Y4\n資訊工程學系\n2A\nINS301\n\n\t', '\xa0\t', 'JAVA程式設計\nB5702009\n資訊工程學系\n2A\nINS301\n\n\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0'],
+                ['第八節\n15:10~16:00\t', 'MATLAB 程式設計\nB57021Y4\n資訊工程學系\n2A\nINS301\n\n\t', 'SUP風浪板\nB92B14Q0\n體育室\n1B\nSPF006\n\n\t', 'JAVA程式設計\nB5702009\n資訊工程學系\n2A\nINS203\n\n\t', '英文聽力與閱讀(進階英文-初級)\nB9D023L4\n大學部英語課程(原外語中心)\n2B\nBOH303\n\n\t', '\xa0\t', '\xa0\t', '\xa0'],
+                ['第九節\n16:05~16:55\t', '\xa0\t', 'SUP風浪板\nB92B14Q0\n體育室\n1B\nSPF006\n\n\t', '\xa0\t', '英文聽力與閱讀(進階英文-初級)\nB9D023L4\n大學部英語課程(原外語中心)\n2B\nBOH303\n\n\t', '\xa0\t', '\xa0\t', '\xa0'],
+                ['第十節\n17:30~18:20\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0'],
+                ['第十一節\n18:30~19:20\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0'],
+                ['第十二節\n19:25~20:15\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0'],
+                ['第十三節\n20:20~21:10\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0'],
+                ['第十四節\n21:15~22:05\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0\t', '\xa0']
+            ];
+
+        // 函數用於動態添加課程表到HTML
+       function loadSchedule() {
+            const table = document.getElementById('schedule');
+            scheduleData.forEach((row, rowIndex) => {
+                const tr = document.createElement('tr');
+                row.forEach((cell, cellIndex) => {
+                    if (rowIndex > 0 && cellIndex > 0 && cell.trim() === scheduleData[rowIndex - 1][cellIndex].trim() && cell.trim() !== '') {
+                        // 跳過重複的課程以實現合併效果
+                        return;
+                    }
+                    cell = cell.replace(/\n\n\t$/, '');
+                    const td = document.createElement(rowIndex === 0 || cellIndex === 0 ? 'th' : 'td');
+                    td.innerHTML = cell.trim() === '' ? '' : cell.replace(/\n/g, '<br>');
+                    if (rowIndex > 0 && cellIndex > 0 && cell.trim() !== '') {
+                        td.classList.add('class-cell');
+                        let rowspan = 1;
+                        for (let i = rowIndex + 1; i < scheduleData.length && scheduleData[i][cellIndex].trim() === cell.trim(); i++) {
+                            rowspan++;
+                        }
+                        if (rowspan > 1) {
+                            td.setAttribute('rowspan', rowspan.toString());
+                        }
+                    }
+                    tr.appendChild(td);
+                });
+                table.appendChild(tr);
+            });
+        }
+
+        // 當頁面加載完成後，執行loadSchedule函數
+        window.onload = loadSchedule;
+    </script>
+
+</body>
+
+</html>

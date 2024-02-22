@@ -108,10 +108,10 @@ async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await query.message.reply_text(text="登入資訊已接收，處理中...")
         global websiteGrab
         try:
-            # websiteGrab, state = await login(context.user_data['username'], context.user_data['password'])
-            # user[context.user_data["userID"]] = websiteGrab
-            # print("return value: ",websiteGrab, state)
-            await asyncio.sleep(7)
+            websiteGrab, state = await login(context.user_data['username'], context.user_data['password'])
+            user[context.user_data["userID"]] = websiteGrab
+            print("return value: ",websiteGrab, state)
+            # await asyncio.sleep(7)
             return await menu(update, context)  # 调用 menu 函数
         except:
             await update.message.reply_text(text="登入失敗請重新操作")
@@ -163,7 +163,8 @@ async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     querySem = context.user_data['semester']
     print("querySem: ",querySem)
     await update.message.reply_text(text="處理中...")
-    global websiteGrab
+    
+    websiteGrab = user[context.user_data["userID"]]
     data,websiteGrab = await downloadGrade(websiteGrab,querySem)
 
     print(data)
@@ -229,6 +230,7 @@ async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def take_screenshot(html, path_to_save):
     browser = await launch(headless=True)
     page = await browser.newPage()
+    # await page.setViewport({'width': 1920, 'height': 1080, 'deviceScaleFactor': 2})
     await page.setContent(html)
     await page.screenshot({'path': path_to_save,'fullPage': True})
     await browser.close()
@@ -241,14 +243,20 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     global websiteGrab
     data,websiteGrab = await downloadSchedule(user[context.user_data["userID"]],querySem)
     print(data)
+    html_content = schedule_head
+    html_content += str(data)+";"
+    html_content += schedule_tail
+
     keyboard = [
         [InlineKeyboardButton("回主選單", callback_data=str(MENU))],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    path_to_screenshot = './score_schreenshot.png'  # 設定截圖保存路徑
-    # await take_screenshot(html_content, path_to_screenshot)
-    # await update.message.reply_photo(photo=open(path_to_screenshot, 'rb'))
+    fileName = "MySchedule.html"
+    with open(fileName, 'w', encoding='utf-8') as file:
+        file.write(html_content)
+    path_to_screenshot = './schedule_schreenshot.png'  # 設定截圖保存路徑
+    await take_screenshot(html_content, path_to_screenshot)
+    await update.message.reply_photo(photo=open(path_to_screenshot, 'rb'))
     await update.message.reply_text(text="請查看課表", reply_markup=reply_markup)
     return await menu(update, context) 
 
