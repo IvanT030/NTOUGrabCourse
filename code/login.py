@@ -6,12 +6,13 @@ from pyppeteer import dialog
 from PIL import Image
 import ddddocr
 import re
-import sqlite3
+import time
 import aiosqlite
 
-fail_types = ('未找到課程','課程不可選','選取失敗','人數已達上限','系統錯誤','年級不可加選！','衝堂不可選！')
+fail_types = ('未找到課程','課程不可選','選取失敗','該課程已達人數上限','系統錯誤','年級不可加選！','衝堂不可選！')
 success_types = ('本科目設有檢查人數下限。選本課程，在未達下限人數前時無法退選，確定加選?', '成功選取')
 msn = -1
+dialogHandled = asyncio.Event()
 
 async def findFrameByName(page, frameName):
     def frameExists(page, name):
@@ -29,26 +30,29 @@ async def waitForSelectorOrTimeout(frame, selector, timeout=30000):
     except TimeoutError:
         print(f"Timeout while waiting for {selector}")
         return False
-    
+
 async def handleDialog(dialog):
     global msn
     text = dialog.message
     print(text)
-    if text in fail_types:
-        msn = 0      
-    elif text in success_types:
-        msn = 1
-    elif text == '驗證碼錯誤，請再重新輸入!!':
+    if text == '驗證碼錯誤，請再重新輸入!!':
         msn = 2
     elif text == '帳號或密碼錯誤，請查明後再登入，若您不確定密碼，請執行忘記密碼，取得新密碼後再登入!':
         msn = 3
-    await dialog.dismiss()
-    
-#改成browser回傳，其他函式改browser接收
+    else:
+        for fail_type in fail_types:
+            if fail_type in text:
+                msn = 0
+                break
+        for success_type in success_types:
+            if success_type in text:
+                msn = 1
+                break
+    await dialog.accept()
+
 async def login(account, password): 
     global msn
-    browser = await launch(slowMo=10,
-                           headless=False,
+    browser = await launch(headless=False,
                            dumpio=True,
                            args=[f'--window-size={1920},{1080}',
                                '--disable-features=TranslateUI', 
@@ -64,10 +68,50 @@ async def login(account, password):
         global msn
         all_pages = await browser.pages()
         loginWebsite = all_pages[0]
-        loginWebsite.on('dialog', lambda dialog: asyncio.ensure_future(handleDialog(dialog)))
-        await loginWebsite.waitForSelector('#M_PW')
+        #輸入密碼
+        if await waitForSelectorOrTimeout(loginWebsite, '#M_PW'):
+            await loginWebsite.type('#M_PW', password)
+        #輸入驗證碼
+        if await waitForSelectorOrTimeout(loginWebsite, '#importantImg'):
+            captcha = await loginWebsite.waitForSelector('#importantImg')
+            await captcha.screenshot({'path': r'C:\GitHub\NTOUGrabCourse\code\captcha.png'})
+            img = Image.open('code/captcha.png')
+            match = False
+            while not match:
+                ocr = ddddocr.DdddOcr()
+                result = ocr.classification(img)
+                print(result)
+                match = re.match(r'^[a-zA-Z0-9]{4}$', result)
+            await loginWebsite.waitForSelector('#M_PW2')
+            await loginWebsite.type('#M_PW2', result.upper())
+        #點擊登入
+        if await waitForSelectorOrTimeout(loginWebsite, '#LGOIN_BTN'):
+            loginButton = await loginWebsite.querySelector('#LGOIN_BTN')
+            await loginButton.click()
+        # await asyncio.sleep(2)
+        tmp = msn; msn = -1
+        if tmp == -1:
+            return browser, "登入成功"
+        elif tmp == 2:
+            return await relogin(browser)
+        elif tmp == 3:
+            await asyncio.sleep(1)
+            await browser.close()
+            return None, "帳密出錯"
+        else: 
+            await asyncio.sleep(1)
+            await browser.close()
+            return None, "未知錯誤"
+        
+    await loginWebsite.goto('https://ais.ntou.edu.tw/Default.aspx') 
+    #輸入帳號
+    if await waitForSelectorOrTimeout(loginWebsite, '#M_PORTAL_LOGIN_ACNT'):
+        await loginWebsite.type('#M_PORTAL_LOGIN_ACNT', account)
+    #輸入密碼
+    if await waitForSelectorOrTimeout(loginWebsite, '#M_PW'):
         await loginWebsite.type('#M_PW', password)
-        await loginWebsite.waitForSelector('#importantImg')
+    #輸入驗證碼
+    if await waitForSelectorOrTimeout(loginWebsite, '#importantImg'):
         captcha = await loginWebsite.waitForSelector('#importantImg')
         await captcha.screenshot({'path': r'C:\GitHub\NTOUGrabCourse\code\captcha.png'})
         img = Image.open('code/captcha.png')
@@ -79,168 +123,81 @@ async def login(account, password):
             match = re.match(r'^[a-zA-Z0-9]{4}$', result)
         await loginWebsite.waitForSelector('#M_PW2')
         await loginWebsite.type('#M_PW2', result.upper())
-        await loginWebsite.waitForSelector('#LGOIN_BTN')
+
+    #點擊登入
+    if await waitForSelectorOrTimeout(loginWebsite, '#LGOIN_BTN'):
         loginButton = await loginWebsite.querySelector('#LGOIN_BTN')
         await loginButton.click()
-        await asyncio.sleep(1)
-        tmp = msn; msn = -1
-        if tmp == -1:
-            return browser, "登入成功"
-        elif tmp == 2:
-            return await relogin(browser)
-        elif tmp == 3:
-            await browser.close()
-            return None, "帳密出錯"
-        else:    
-            await browser.close()
-            return None, "未知錯誤"
-        
-    await loginWebsite.goto('https://ais.ntou.edu.tw/Default.aspx') 
-    #輸入帳號
-    await loginWebsite.waitForSelector('#M_PORTAL_LOGIN_ACNT')
-    await loginWebsite.type('#M_PORTAL_LOGIN_ACNT', account)
-    await loginWebsite.waitForSelector('#M_PW')
-    await loginWebsite.type('#M_PW', password)
-    await loginWebsite.waitForSelector('#importantImg')
-    captcha = await loginWebsite.waitForSelector('#importantImg')
-    await captcha.screenshot({'path': r'C:\GitHub\NTOUGrabCourse\code\captcha.png'})
-    img = Image.open('code/captcha.png')
-   
-    pattern = r'^[a-zA-Z0-9]{4}$'
-    match = False
-    result = ''
 
-    while not match:
-        ocr = ddddocr.DdddOcr()
-        result = ocr.classification(img) 
-        print(result)
-        match = re.match(pattern, result)
+    await asyncio.sleep(2)
 
-    await loginWebsite.waitForSelector('#M_PW2')
-    await loginWebsite.type('#M_PW2', result.upper())
-    await loginWebsite.waitForSelector('#LGOIN_BTN')
-    loginButton = await loginWebsite.querySelector('#LGOIN_BTN')
-    await loginButton.click()
-    await asyncio.sleep(1)
     tmp = msn; msn = -1
     if tmp == -1:
+        print('browser + ', browser)
         return browser, "登入成功"
     elif tmp == 2:
         return await relogin(browser)
     elif tmp == 3:
-        print(account,'關掉')
+        await asyncio.sleep(1)
         await browser.close()
         return None, "帳密出錯"
-    else:  
-        print(account,'關掉')  
+    else:    
+        await asyncio.sleep(1)
         await browser.close()
         return None, "未知錯誤"
-     
 
-
-async def downloadScedule(browser, semester):
+async def downloadSchedule(browser, semester):
     all_pages = await browser.pages()
     page = all_pages[0]
     year = semester[:3]; sms = semester[3]  
-    await asyncio.sleep(1.5)
     menuFrame = None; mainFrame = None
-    frames = page.frames
-    for frame in frames:
-        if frame.name == 'menuFrame':
-            menuFrame = frame
-        elif frame.name == 'mainFrame':
-            mainFrame = frame 
-    await menuFrame.waitForSelector('#Menu_TreeViewt1')
-    await menuFrame.click('#Menu_TreeViewt1')
-    await menuFrame.waitForSelector('#Menu_TreeViewt31')
-    await menuFrame.click('#Menu_TreeViewt31')
-    await menuFrame.waitForSelector('#Menu_TreeViewt42')
-    await menuFrame.click('#Menu_TreeViewt42')
-    await mainFrame.waitForSelector('#Q_AYEAR')
-    await mainFrame.select('#Q_AYEAR', year)
-    await mainFrame.waitForSelector('#Q_SMS')
-    await mainFrame.select('#Q_SMS', sms)
-    await mainFrame.waitForSelector('#QUERY_BTN3')
-    await mainFrame.click('#QUERY_BTN3')
-    await asyncio.sleep(3)
+    menuFrame = await findFrameByName(page, 'menuFrame')
+    mainFrame = await findFrameByName(page, 'mainFrame')
 
-    table_content = await mainFrame.evaluate('''() => {
-        const table = document.querySelector("#table2");
-        const rows = Array.from(table.querySelectorAll("tr"));
-        return rows.map(row => {
-            const cells = Array.from(row.querySelectorAll("td"));
-            return cells.map(cell => cell.innerText);
-        });
-    }''')
-    #print(table_content)
+    if await waitForSelectorOrTimeout(menuFrame, '#Menu_TreeViewt1'):
+        await menuFrame.click('#Menu_TreeViewt1')
+    if await waitForSelectorOrTimeout(menuFrame, '#Menu_TreeViewt31'):
+        await menuFrame.click('#Menu_TreeViewt31')
+    if await waitForSelectorOrTimeout(menuFrame, '#Menu_TreeViewt42'):
+        await menuFrame.click('#Menu_TreeViewt42')
+    if await waitForSelectorOrTimeout(mainFrame, '#Q_AYEAR'):
+        await mainFrame.select('#Q_AYEAR', year)
+    if await waitForSelectorOrTimeout(mainFrame, '#Q_SMS'):
+        await mainFrame.select('#Q_SMS', sms)
+    if await waitForSelectorOrTimeout(mainFrame, '#QUERY_BTN3'):
+        await mainFrame.click('#QUERY_BTN3')
+    if await waitForSelectorOrTimeout(mainFrame, '#table2'):
+        table_content = await mainFrame.evaluate('''() => {
+            const table = document.querySelector("#table2");
+            const rows = Array.from(table.querySelectorAll("tr"));
+            return rows.map(row => {
+                const cells = Array.from(row.querySelectorAll("td"));
+                return cells.map(cell => cell.innerText);
+            });
+        }''')
+    print(table_content)
     await page.reload()
     return table_content, browser
 
 async def downloadGrade(browser, semester):
     all_pages = await browser.pages()
     page = all_pages[0]
-    await asyncio.sleep(3)
     menuFrame = None; mainFrame = None; viewFrame = None
-    await page.waitForSelector('#menuIFrame')
-    await page.waitForSelector('#mainIFrame')
-    await page.waitForSelector('#viewIFrame')
-    frames = page.frames
-    for frame in frames:
-        print(frame.name)
-        if frame.name == 'menuFrame':
-            menuFrame = frame
-        elif frame.name == 'mainFrame':
-            mainFrame = frame 
-        elif frame.name == 'viewFrame':
-            viewFrame = frame
+    menuFrame = await findFrameByName(page, 'menuFrame')
+    mainFrame = await findFrameByName(page, 'mainFrame')
+    viewFrame = await findFrameByName(page, 'viewFrame')
     if await waitForSelectorOrTimeout(menuFrame, '#Menu_TreeViewt1'):
         await menuFrame.click('#Menu_TreeViewt1')
     if await waitForSelectorOrTimeout(menuFrame, '#Menu_TreeViewt32'):
         await menuFrame.click('#Menu_TreeViewt32')
     if await waitForSelectorOrTimeout(menuFrame, '#Menu_TreeViewt40'):
         await menuFrame.click('#Menu_TreeViewt40')
-    # await menuFrame.waitForSelector('#Menu_TreeViewt1')
-    # await menuFrame.click('#Menu_TreeViewt1')
-    # await menuFrame.waitForSelector('#Menu_TreeViewt32')
-    # await menuFrame.click('#Menu_TreeViewt32')
-    # await menuFrame.waitForSelector('#Menu_TreeViewt40')
-    # await menuFrame.click('#Menu_TreeViewt40')
-
-    print('click')  
-    print("menuFrame: ", menuFrame)
-    # await asyncio.sleep(4)
-    # if await waitForSelectorOrTimeout(menuFrame, '#pageFrame'):
-    # frames = page.frames
-    # for frame in frames:
-    #     if frame.name == 'menuFrame':
-    #         menuFrame = frame
-    #     elif frame.name == 'mainFrame':
-    #         mainFrame = frame 
-    #     elif frame.name == 'viewFrame':
-    #         viewFrame = frame
-    #     print(frame.name)
     if await waitForSelectorOrTimeout(mainFrame, '#Q_AYEARSMS'):
-        # await menuFrame.click('#MainIFrame')
-    # await menuFrame.click('#Menu_TreeViewt40')
         await mainFrame.evaluate(f"""() => {{
             document.getElementById('Q_AYEARSMS').value = '{semester}';
         }}""")
-    print("sfsdsff")
     if await waitForSelectorOrTimeout(mainFrame, '#QUERY_BTN1'):
         await mainFrame.click('#QUERY_BTN1')
-    # print('click')
-    # await mainFrame.waitForSelector('#QUERY_BTN1')
-    # await mainFrame.click('#QUERY_BTN1')
-    # await asyncio.sleep(2)
-    # frames = page.frames
-    # for frame in frames:
-    #     if frame.name == 'menuFrame':
-    #         menuFrame = frame
-    #     elif frame.name == 'mainFrame':
-    #         mainFrame = frame 
-    #     elif frame.name == 'viewFrame':
-    #         viewFrame = frame
-    #     print(frame.name)
     if await waitForSelectorOrTimeout(viewFrame, '#DataGrid tbody tr'):
         trs = await viewFrame.querySelectorAll('#DataGrid tbody tr')
     data = []
@@ -267,8 +224,6 @@ async def downloadGrade(browser, semester):
         classRank = await viewFrame.querySelectorEval('#M_CLASS_RANK', 'node => node.innerText')
     if await waitForSelectorOrTimeout(viewFrame, '#M_FACULTY_RANK'):
         faculityRank = await viewFrame.querySelectorEval('#M_FACULTY_RANK', 'node => node.innerText')
-    # classRank = await viewFrame.querySelectorEval('#M_CLASS_RANK', 'node => node.innerText')
-    # faculityRank = await viewFrame.querySelectorEval('#M_FACULTY_RANK', 'node => node.innerText')
 
     data.append(average_score)
     data.append(classRank)
@@ -342,16 +297,76 @@ async def searchCourse(browser, course):
     await page.reload()
     return data, page
 
-userWeb = {}
-async def main():
-    a, _ = await login('01157132', 'R125179001')
-    await downloadGrade(a, '1112')
-    await a.close()
-    
+async def snipeCourse(resnipe, browser, course, which=None):
+    global msn
+    all_pages = await browser.pages()
+    page = all_pages[0]
+    menuFrame = None; mainFrame = None
+    print('here')
+    menuFrame = await findFrameByName(page, 'menuFrame')
+    mainFrame = await findFrameByName(page, 'mainFrame')
 
-#asyncio.get_event_loop().run_until_complete(main())
+    if not resnipe: 
+        selectors_and_frames = [
+            (menuFrame, '#Menu_TreeViewt1'),
+            (menuFrame, '#Menu_TreeViewt31'),
+            (menuFrame, '#Menu_TreeViewt41')]
+
+        for frame, selector in selectors_and_frames:
+            if await waitForSelectorOrTimeout(frame, selector):
+                await frame.click(selector)
+
+    if await waitForSelectorOrTimeout(mainFrame, '#Q_COSID'):
+        await mainFrame.evaluate(f"""() => {{
+            document.getElementById('Q_COSID').value = '{course}';
+        }}""")
+    if await waitForSelectorOrTimeout(mainFrame, '#QUERY_COSID_BTN'):
+        await mainFrame.click('#QUERY_COSID_BTN')
+    await asyncio.sleep(1)#會抓到其他的
+
+    if await waitForSelectorOrTimeout(mainFrame, '#DataGrid1 tbody tr'):
+        trs = await mainFrame.querySelectorAll('#DataGrid1 tbody tr')
+
+    if len(trs) == 2:
+        if await waitForSelectorOrTimeout(mainFrame, '#DataGrid1_ctl02_edit'):
+            await mainFrame.click('#DataGrid1_ctl02_edit')
+    else:
+        for i, tr in enumerate(trs):
+            if i == 0:
+                continue
+            tds = await tr.querySelectorAll('td')
+            whichClass = await (await tds[3].getProperty('innerText')).jsonValue()
+            print(whichClass)
+            if which.upper() == whichClass.upper():
+                onclick = await tds[0].querySelector('a')
+                await onclick.click()
+
+    await asyncio.sleep(2)
+    tmp = msn; msn = -1
+    if tmp == -1:
+        return False, browser, "未知錯誤"
+    elif tmp == 0:
+        return True, browser, "搶課失敗"
+    elif tmp == 1:
+        return True, browser, "搶課成功"
+    #回傳是否可以resnipe, browser
+    
+async def main():
+    a, b = await login('01157132', 'R125179001')
+    print(b)
+    a,b,c = await snipeCourse(False , a, 'B57020A6')
+    print(c)
+    a,b,c = await snipeCourse(a , b, 'B5701M3J', 'B')
+    print(c)
+    a,b,c = await snipeCourse(a , b, 'B570258M')
+    print(c)
+    b.close()
+    #await snipeCourse(a, 'B5701M3J', 'A')
+
+asyncio.get_event_loop().run_until_complete(main())
 
 #使用時間逾時, 系統已將您自動登出, 請再重新登入使用本系統!! <== 掛機alert
 #系統同時一次僅許可一個帳號登入，你已登入過系統，請先登出原帳號再登入!
 #連續輸入３次錯誤密碼，帳號已鎖定，請後續執行忘記密碼，取得新密碼後再登入!
 #系統發生錯誤 ... <= F5解決
+#本帳號已重複登入，請登出!
