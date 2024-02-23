@@ -7,82 +7,88 @@ import aiosqlite
 import sqlite3
 import threading
 from pyppeteer import launch
-#courses字串:'哪節:狀態,哪節:狀態' 狀態分成0(還沒搶)，1(正在搶)(防止同時讀檔案的race condition)，2(搶玩了)
+#courses字串:'哪節:狀態,哪節:狀態' 狀態分成0(還沒搶)，1(正在搶)(防止同時讀檔案的race condition)，2(搶玩了)，3(錯誤)
 
-
-maxThread = 5
-currentThread = 0
-
-maxBrowser = 5
-task_queue = asyncio.Queue(maxsize=10)
+maxBrowser = 5 #not using yet
+task_queue = asyncio.Queue(maxsize=30)
 userWeb = {} #{user: [web, resnipe]}
+getTaskSleepTime = 2
+doTaskSleepTask = 2
+
 
 async def getTask():#太久沒有接任務可以做成怠速模式
-    global currentThread
     global task_queue
     while True:
-        print('get Task')
-        if currentThread < maxThread:
-            conn = sqlite3.connect('snapCourse.db')
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM snapCourse LIMIT 1")
-            first_row = cursor.fetchone()
-            print('get value',first_row)
-            if first_row == None:
-                await asyncio.sleep(2)
-                continue
-            await task_queue.put(first_row)
-            currentThread += 1
-            cursor.execute("DELETE FROM snapCourse WHERE rowid = (SELECT MIN(rowid) FROM snapCourse)")
-            conn.commit()
-            cursor.close()
-            conn.close()
-        await asyncio.sleep(2)
+        print('拿任務')
+        conn = sqlite3.connect('snapCourse.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM snapCourse LIMIT 1")
+        first_row = cursor.fetchone()
+        if first_row == None:
+            await asyncio.sleep(getTaskSleepTime)
+            continue
+        await task_queue.put(first_row)
+        cursor.execute("DELETE FROM snapCourse WHERE rowid = (SELECT MIN(rowid) FROM snapCourse)")
+        conn.commit()
+        cursor.close()
+        conn.close()
+        await asyncio.sleep(getTaskSleepTime)
 
 async def doTask(): 
-    global currentThread
+    conn = sqlite3.connect('userCourse.db')
+    cursor = conn.cursor()
     global task_queue
-    endLoginTasks = asyncio.Queue()
-    endSnipeTasks = asyncio.Queue()
     while True:
-        print('the end:', endLoginTasks)
         try:
-            #snipeCourseValue = (browser,"...",account,course,(which)不一定)<=tuple
-            snipeCourseValue = endLoginTasks.get_nowait() 
-            if snipeCourseValue[0] == None:
-                currentThread -= 1
-                continue
-            print('start : ', snipeCourseValue)
-            # if snipeCourseValue[2] not in userWeb:
-            snipeThread = threading.Thread(target= 
-                    lambda: asyncio.run(snipeCourse(False, snipeCourseValue[0], snipeCourseValue[3])))#, snipeCourseValue[4])
-            # else:
-            #     snipeThread = threading.Thread(target= 
-            #         lambda: asyncio.run(snipeCourse(True, snipeCourseValue[0], snipeCourseValue[3])))#, snipeCourseValue[4])
-            snipeThread.start()
-        except asyncio.QueueEmpty:
-            print('end login task is empty! :))')
-            pass
-        try:
-            task = task_queue.get_nowait()
-            account = task[0]
+            print('做任務')
+            task = task_queue.get_nowait() #task = [account, password, course]
+            account = task[0]; password = task[1]; course = task[2]; which = task[3]
+            result = ''
+            print(account + '開始搶' + course)
             if account not in userWeb:
-                logThread = threading.Thread(target= 
-                    lambda: asyncio.run(endLoginTasks.put(asyncio.run(login(task[0], task[1])) + (account, task[2]))))
-                logThread.start()
-                print(account + 'start login')
+                browser, _ = await login(task[0], password)
+                if browser == None:
+                    print(account + 'login error')
+                    cursor.execute('SELECT courses FROM userData WHERE account = ?', (account,))
+                    totalCourses = cursor.fetchone()  # 檢索第一條符合條件的記錄
+                    totalCourses = totalCourses[0].split(',')
+                    for i, item in enumerate(totalCourses):
+                        key = item.split(':')  # 將字串按照冒號分割成鍵和值 [課號:課名:班別:狀態,]
+                        if key[0] == course:
+                            totalCourses[i] = f'{key[0]}:{key[1]}:{key[2]}:1'
+                            break
+                    coureTxt = ','.join(totalCourses)
+                    cursor.execute('UPDATE `userData` SET `courses` = ? WHERE `account` IS ?', (coureTxt ,account))
+                    conn.commit()
+                    continue
+                _, _, result = await snipeCourse(False, browser, course, which)
+                userWeb[account] = browser
+            else:
+                _, _, result = await snipeCourse(True, userWeb[account], course, which)
+            if result == '人滿':
+                await task_queue.put(task)
+            cursor.execute('SELECT courses FROM userData WHERE account = ?', (account,))
+            totalCourses = cursor.fetchone()  # 檢索第一條符合條件的記錄
+            totalCourses = totalCourses[0].split(',')
+            for i, item in enumerate(totalCourses):
+                key = item.split(':')  # 將字串按照冒號分割成鍵和值
+                if key[0] == course:
+                    if result == '搶課失敗':
+                        totalCourses[i] = f'{key[0]}:{key[1]}:{key[2]}:3'
+                    elif result == '搶課成功':
+                        totalCourses[i] = f'{key[0]}:{key[1]}:{key[2]}:2'
+                    break
+            coureTxt = ','.join(totalCourses)
+            cursor.execute('UPDATE `userData` SET `courses` = ? WHERE `account` IS ?', (coureTxt ,account))
+            conn.commit()
+
         except asyncio.QueueEmpty:
             #print('task queue is empty! :)))')
             pass
-        await asyncio.sleep(2)
+        await asyncio.sleep(doTaskSleepTask)
 
 if __name__ == '__main__':
     getTaskThread = threading.Thread(target= lambda: asyncio.run(getTask()))
     doTaskThread = threading.Thread(target= lambda: asyncio.run(doTask()))
     getTaskThread.start()
     doTaskThread.start()
-
-# 提交更改
-# conn.commit()
-# 關閉連接
-# conn.close()
