@@ -52,7 +52,7 @@ async def handleDialog(dialog):
 
 async def login(account, password): 
     global msn
-    browser = await launch(headless=False,
+    browser = await launch(headless=True,
                            dumpio=True,
                            args=[f'--window-size={1920},{1080}',
                                '--disable-features=TranslateUI', 
@@ -293,9 +293,8 @@ async def searchCourse(browser, course):
             "期限": await (await tds[16].getProperty('innerText')).jsonValue()
         }
         data.append(td_innerText)
-    print(data)
     await page.reload()
-    return data, page
+    return data, browser
 
 async def snipeCourse(resnipe, browser, course, which=None):
     global msn
@@ -363,7 +362,7 @@ async def main():
     b.close()
     #await snipeCourse(a, 'B5701M3J', 'A')
 
-asyncio.get_event_loop().run_until_complete(main())
+# asyncio.get_event_loop().run_until_complete(main())
 
 #使用時間逾時, 系統已將您自動登出, 請再重新登入使用本系統!! <== 掛機alert
 #系統同時一次僅許可一個帳號登入，你已登入過系統，請先登出原帳號再登入!

@@ -2,6 +2,7 @@
 import logging
 import os
 import asyncio
+import sqlite3
 from dotenv import load_dotenv
 import selenium
 from selenium import webdriver
@@ -38,7 +39,7 @@ GET_USERNAME, GET_PASSWORD, SUBMIT_PASSWORD, LOGIN ,CONFIRM_PASSWORD,PROCESS_SEM
 # Callback data
 START, BACK_TO_USERNAME, CONFIRM_LOGIN, BACK_TO_PASSWORD, GET_SEMESTER,GET_SCORE,GET_SCHEDULE, LOGOUT = range(8,16)
 
-GRAB_COURSE, INPUT_COURSE_ID, CHECK_COURSE_ID, CHECK_COURSE_ID_AND_BACK_TO_MENU, BACK_TO_MENU, LOOK_GRAB_COURSE_STATE, EDIT_COURSE_STATE ,DELETE_GRAB_COURSE = range(16,24)
+GRAB_COURSE, INPUT_COURSE_ID, CHECK_COURSE_ID, CHECK_COURSE_ID_AND_BACK_TO_MENU, BACK_TO_MENU, LOOK_GRAB_COURSE_STATE, CHOOSE_COURSE, EDIT_COURSE_STATE ,DELETE_GRAB_COURSE = range(16,25)
 
 def browsereOptions():
     option = webdriver.ChromeOptions()
@@ -48,15 +49,66 @@ def browsereOptions():
     option.add_argument('--window-size=1920,1080')  
     return option
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data["userID"] = update.message.from_user.id
-    print("user id: ",context.user_data["userID"])
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    conn = sqlite3.connect('userCourse.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM userData WHERE userID = ?", (context.user_data["userID"],))
+    userData = cursor.fetchone()
+    if not userData:
+        cursor.execute("INSERT INTO userData (userID, account, password) VALUES (?, ?, ?)", (context.user_data["userID"], context.user_data['username'], context.user_data['password']))
+        conn.commit()
+    conn.close()
+    print("menu")
     keyboard = [
-        [InlineKeyboardButton("登入教學務系統", callback_data=str(START))]
+        [InlineKeyboardButton("查詢課表", callback_data=str(GET_SCHEDULE))],
+        [InlineKeyboardButton("查詢成績", callback_data=str(GET_SCORE))],
+        [InlineKeyboardButton("輸入搶課課號", callback_data=str(INPUT_COURSE_ID))],
+        [InlineKeyboardButton("修改搶課名單", callback_data=str(LOOK_GRAB_COURSE_STATE))],
+        [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("尚未登入教學務系統，請登入：", reply_markup=reply_markup)
-    return GET_USERNAME
+    query = update.callback_query
+    print("fsdfsf")
+    if query:
+        await query.answer()
+        await query.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
+    return MENU
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data["userID"] = update.message.from_user.id
+    conn = sqlite3.connect('userCourse.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM userData WHERE userID = ?", (context.user_data["userID"],))
+    userData = cursor.fetchone()    
+    cursor.close()
+    if userData:
+        print("userData: ",userData)
+        context.user_data['username'] = userData[1]
+        context.user_data['password'] = userData[2]
+        # try:
+        websiteGrab, state = await login(context.user_data['username'], context.user_data['password'])
+        user[context.user_data["userID"]] = websiteGrab
+        print("return value: ",websiteGrab, state)
+        if state == "登入成功":
+            await update.message.reply_text(text="登入成功")
+            return await menu(update, context)
+        elif state == "帳密出錯":
+            await update.message.reply_text(text="登入失敗請重新操作")
+            return ConversationHandler.END
+        # except:
+            # await query.message.reply_text(text="登入失敗請重新操作")
+            # print("error")
+            # return ConversationHandler.END
+    else:
+        print("no userData")
+        print("user id: ",context.user_data["userID"])
+        keyboard = [
+            [InlineKeyboardButton("登入教學務系統", callback_data=str(START))]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("尚未登入教學務系統，請登入：", reply_markup=reply_markup)
+        return GET_USERNAME
 
 async def get_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -96,9 +148,6 @@ async def confirm_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 user={}
 
-
-
-
 async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("login_confirm")
     global user
@@ -111,28 +160,18 @@ async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             websiteGrab, state = await login(context.user_data['username'], context.user_data['password'])
             user[context.user_data["userID"]] = websiteGrab
             print("return value: ",websiteGrab, state)
-            # await asyncio.sleep(7)
-            return await menu(update, context)  # 调用 menu 函数
+            if state == "登入成功":
+                await query.message.reply_text(text="登入成功")
+                return await menu(update, context)
+            elif state == "帳密出錯":
+                await query.message.reply_text(text="登入失敗請重新操作")
+                return ConversationHandler.END
         except:
-            await update.message.reply_text(text="登入失敗請重新操作")
+            # await query.message.reply_text(text="登入失敗請重新操作")
+            print("error")
             return ConversationHandler.END
 
 
-async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("menu")
-    keyboard = [
-        [InlineKeyboardButton("查詢課表", callback_data=str(GET_SCHEDULE))],
-        [InlineKeyboardButton("查詢成績", callback_data=str(GET_SCORE))],
-        [InlineKeyboardButton("輸入搶課課號", callback_data=str(INPUT_COURSE_ID))],
-        [InlineKeyboardButton("修改搶課名單", callback_data=str(LOOK_GRAB_COURSE_STATE))],
-        [InlineKeyboardButton("登出教學務系統", callback_data=str(LOGOUT))],
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    query = update.callback_query
-    if query:
-        await query.answer()
-        await query.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
-    return MENU
 
 async def get_semester(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("get_semester")
@@ -225,7 +264,8 @@ async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await take_screenshot(html_content, path_to_screenshot)
     await update.message.reply_photo(photo=open(path_to_screenshot, 'rb'))
     await update.message.reply_text(text="請查看成績", reply_markup=reply_markup)
-    return await menu(update, context) 
+    # return await menu(update, context) 
+    return MENU
 
 async def take_screenshot(html, path_to_save):
     browser = await launch(headless=True)
@@ -258,7 +298,8 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     await take_screenshot(html_content, path_to_screenshot)
     await update.message.reply_photo(photo=open(path_to_screenshot, 'rb'))
     await update.message.reply_text(text="請查看課表", reply_markup=reply_markup)
-    return await menu(update, context) 
+    # return await menu(update, context) 
+    return MENU
 
 #需要有一個查詢db此user選了多少堂課的function
 targetCourse = dict()
@@ -266,6 +307,16 @@ async def input_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     print("input_course_id")
     userID = context.user_data["userID"]
     query = update.callback_query
+    conn = sqlite3.connect('userCourse.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM userData WHERE userID = ?", (userID,))
+    userData = cursor.fetchone()
+    if userData[3] == None:
+        targetCourse[userID] = []
+    else:
+        print("userData[3]",userData[3] )
+        courses = userData[3].split(",")
+        targetCourse[userID] = courses
     await query.answer()
     keyboard = [
         [InlineKeyboardButton("回主選單", callback_data=str(BACK_TO_MENU))],
@@ -273,13 +324,13 @@ async def input_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     reply_markup = InlineKeyboardMarkup(keyboard)
     if userID not in targetCourse:
         targetCourse[userID] = []
-    content = f"您已選擇{len(targetCourse[userID])}門課程"
-    if len(targetCourse[userID]) > 4:
+    content = f"您已選擇{len(targetCourse[userID])-1}門課程"
+    if len(targetCourse[userID]) > 5:
         content += "，可用額度已滿，若需修改搶課名單，請至\"修改搶課名單\"選項修改"
         await query.edit_message_text(text=content, reply_markup=reply_markup)
         return await menu(update, context)
     else:
-        content += f"，還有{4-len(targetCourse[userID])}門課程可選，請輸入搶課課號："
+        content += f"，還有{5-len(targetCourse[userID])}門課程可選，請輸入搶課課號："
         await query.edit_message_text(text=content,reply_markup=reply_markup)
         return GRAB_COURSE
         
@@ -291,7 +342,7 @@ async def confirm_target_course(update: Update, context: ContextTypes.DEFAULT_TY
     content = f"您已選擇 {targetCourseID}，請繼續以下操作"
 
     keyboard = [
-        [InlineKeyboardButton("回主選單", callback_data=str(BACK_TO_MENU))]
+        [InlineKeyboardButton("取消並回主選單", callback_data=str(BACK_TO_MENU))]
     ]
     if len(targetCourse[update.message.from_user.id]) < 4:
         keyboard[0].append(InlineKeyboardButton("確認並繼續輸入", callback_data=str(CHECK_COURSE_ID)))
@@ -302,33 +353,163 @@ async def confirm_target_course(update: Update, context: ContextTypes.DEFAULT_TY
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(text=content, reply_markup=reply_markup)
     return GRAB_COURSE
-
+def clean_string(s):
+    return s.strip().replace('\xa0', ' ')
+def format_course(course):
+    return f"""課號: {clean_string(course['課號'])}
+    課名: {clean_string(course['課名'])}
+    開課單位: {clean_string(course['開課單位'])}
+    年級班別: {clean_string(course['年級班別'])}
+    教授: {clean_string(course['教授'])}
+    是否英文: {clean_string(course['是否英文'])}
+    學分: {clean_string(course['學分'])}
+    選別: {clean_string(course['選別'])}
+    人數上下限: {clean_string(course['人數上下限'])}
+    實習: {clean_string(course['實習'])}
+    期限: {clean_string(course['期限'])}
+    """
 #需要一個檢查課號是否存在的function
 async def check_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("check_course_id") 
     courseID = context.user_data['targetCourseID']
-    # check if courseID exists
+    data,websiteGrab = await searchCourse(user[context.user_data["userID"]],courseID)
+    user[context.user_data["userID"]] = websiteGrab
+    context.user_data['targetCourseData'] = data
+    query = update.callback_query
     userID = context.user_data["userID"]
-    if True:
-        targetCourse[userID].append(courseID)
-    return await input_course_id(update, context)
+    if len(data) == 1:
+        targetCourse[userID].append(f"{courseID},{data[0]['課名'].strip()},{data[0]['年級班別'].strip()}")
+        conn = sqlite3.connect('userCourse.db')
+        cursor = conn.cursor()
+        value = f"{courseID}:{data[0]["課名"].strip()}:{data[0]["年級班別"].strip()}:0,"
+        cursor.execute("UPDATE userData SET courses = courses || ? WHERE userID = ?", (value, userID))
+        conn.commit()
+        cursor.close()
+        conn = sqlite3.connect('snapCourse.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM snapCourse WHERE account = ? AND password = ? AND course = ? ", (context.user_data['username'], context.user_data['password'], courseID))
+        checkData = cursor.fetchone()[0]
+        print("checkData",checkData)
+        if checkData < 4:
+            cursor.execute("INSERT INTO snapCourse (account, password, course) VALUES (?, ?, ?)", (context.user_data['username'], context.user_data['password'], courseID))
+            conn.commit()
+        cursor.close()
+        return await input_course_id(update, context)
+    elif len(data) > 1:
+        content = "此課號有多門課程，以下為查詢結果：\n"
+        formatted_courses = [format_course(course) for course in data]
+        content += "\n".join(formatted_courses)
+        content += "\n\n請選擇要搶的課程年級班別"
+        keyboard = []
+        for course in data:
+            grade_class = course['年級班別'].strip()
+            keyboard.append([InlineKeyboardButton(grade_class, callback_data=f"CHOOSE_COURSE_{grade_class}{0}")])#1=要回menu
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        print("keyboard",keyboard)
+        
+        await query.edit_message_text(text=content, reply_markup=reply_markup)
+        return GRAB_COURSE
+    else:
+        await query.edit_message_text(text="查無此課號，請重新輸入")
+        return await input_course_id(update, context)
+
 
 async def check_course_id_and_back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:  
     print("check_course_id_and_back_to_menu")
     courseID = context.user_data['targetCourseID']
     userID = context.user_data["userID"]
-    # check if courseID exists
-    if True:
-        targetCourse[userID].append(courseID)
-    return await menu(update, context)
+    query = update.callback_query
+    courseID = context.user_data['targetCourseID']
+    data,websiteGrab = await searchCourse(user[context.user_data["userID"]],courseID)
+    user[context.user_data["userID"]] = websiteGrab
+    context.user_data['targetCourseData'] = data
+    if len(data) == 1:
+        targetCourse[userID].append(f"{courseID},{data[0]['課名'].strip()},{data[0]['年級班別'].strip()}")
+        conn = sqlite3.connect('userCourse.db')
+        cursor = conn.cursor()
+        value = f"{courseID}:{data[0]["課名"].strip()}:{data[0]["年級班別"].strip()}:0,"
+        cursor.execute("UPDATE userData SET courses = courses || ? WHERE userID = ?", (value, userID))
+        conn.commit()
+        cursor.close()
+        conn = sqlite3.connect('snapCourse.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM snapCourse WHERE account = ? AND password = ? AND course = ? ", (context.user_data['username'], context.user_data['password'], courseID))
+        checkData = cursor.fetchone()[0]
+        print("checkData",checkData)
+        if checkData < 4:
+            cursor.execute("INSERT INTO snapCourse (account, password, course) VALUES (?, ?, ?)", (context.user_data['username'], context.user_data['password'], courseID))
+            conn.commit()
+        cursor.close()
+        return await menu(update, context)
+    elif len(data) > 1:
+        content = "此課號有多門課程，以下為查詢結果：\n"
+        formatted_courses = [format_course(course) for course in data]
+        content += "\n".join(formatted_courses)
+        content += "\n\n請選擇要搶的課程年級班別"
+        keyboard = []
+        for course in data:
+            grade_class = course['年級班別'].strip()
+            keyboard.append([InlineKeyboardButton(grade_class, callback_data=f"CHOOSE_COURSE_{grade_class}{1}")])#1=要回menu
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        print("keyboard",keyboard)
+        
+        await query.edit_message_text(text=content, reply_markup=reply_markup)
+        return GRAB_COURSE
+    else:
+        query.edit_message_text(text="查無此課號，請重新輸入")
+        return await input_course_id(update, context)
 
+async def choose_course(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("choose_course")
+    query = update.callback_query
+    await query.answer()
+    choose_course = query.data[15:]
+    print("choose_course",choose_course)
+    choose_course = [char for char in choose_course if char.isupper()]
+    userID = context.user_data["userID"]
+    courseID = context.user_data["targetCourseID"]
+    data = context.user_data["targetCourseData"]
+    targetCourse[userID].append(f"{courseID},{data[0]['課名'].strip()},{data[0]['年級班別'].strip()}")
+    conn = sqlite3.connect('userCourse.db')
+    cursor = conn.cursor()
+    value = f"{courseID}:0,"
+    cursor.execute("UPDATE userData SET courses = courses || ? WHERE userID = ?", (value, userID))
+    conn.commit()
+    cursor.close()
+    conn = sqlite3.connect('snapCourse.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM snapCourse WHERE account = ? AND password = ? AND course = ? ", (context.user_data['username'], context.user_data['password'], courseID))
+    checkData = cursor.fetchone()[0]
+    print("checkData",checkData)
+    if checkData < 4:
+        cursor.execute("INSERT INTO snapCourse (account, password, course) VALUES (?, ?, ?)", (context.user_data['username'], context.user_data['password'], courseID))
+        conn.commit()
+    cursor.close()
+    
+    returnGoal = query.data[-1]
+    if returnGoal == "1":
+        return await menu(update, context)
+    else:
+        return await input_course_id(update, context)
+    
 async def look_grab_course_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("look_grab_course_state")
     query = update.callback_query
     await query.answer()
     userID = context.user_data["userID"]
-    if userID not in targetCourse:
+
+    conn = sqlite3.connect('userCourse.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM userData WHERE userID = ?", (userID,))
+    userData = cursor.fetchone()
+    if userData[3] == None:
         targetCourse[userID] = []
+    else:
+        print("userData[3]",userData[3] )
+        courses = userData[3].split(",")
+        targetCourse[userID] = courses
+    conn.close()
+    
     if len(targetCourse[userID]) == 0:
         content = "您尚未選擇任何課程"
     else:
@@ -336,8 +517,9 @@ async def look_grab_course_state(update: Update, context: ContextTypes.DEFAULT_T
     keyboard = []
     print("targetCourse[userID]",targetCourse[userID])
     for course in targetCourse[userID]:
-        print("course",course)
-        keyboard.append([InlineKeyboardButton(course, callback_data=f"EDIT_COURSE_STATE_{course}"),])
+        info = course.split(":")
+        courseInfo = f"{info[0]}\n{info[1]}\n{info[2]}"
+        keyboard.append([InlineKeyboardButton(courseInfo, callback_data=f"EDIT_COURSE_STATE_{course}"),])
     keyboard.append([InlineKeyboardButton("回主選單", callback_data=str(BACK_TO_MENU))])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -345,8 +527,6 @@ async def look_grab_course_state(update: Update, context: ContextTypes.DEFAULT_T
 
     await query.edit_message_text(text=content, reply_markup=reply_markup)
     return GRAB_COURSE
-
-
 
 #需要一個查詢該課程有沒有搶到的function
 async def edit_course_state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -427,6 +607,7 @@ def main() -> None:
                 CallbackQueryHandler(menu, pattern="^" + str(BACK_TO_MENU) + "$"),
                 CallbackQueryHandler(check_course_id, pattern="^" + str(CHECK_COURSE_ID) + "$"),
                 CallbackQueryHandler(check_course_id_and_back_to_menu, pattern="^" + str(CHECK_COURSE_ID_AND_BACK_TO_MENU) + "$"),
+                CallbackQueryHandler(choose_course, pattern="^" + "CHOOSE_COURSE_"),
                 CallbackQueryHandler(edit_course_state, pattern="^" + "EDIT_COURSE_STATE_" ),
                 CallbackQueryHandler(delete_grab_course, pattern="^" + str(DELETE_GRAB_COURSE) + "$"),
             ],
