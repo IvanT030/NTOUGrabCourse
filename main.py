@@ -4,6 +4,7 @@ import os
 import asyncio
 import sqlite3
 from dotenv import load_dotenv
+import colorlog
 import selenium
 from selenium import webdriver
 from telegram.constants import ParseMode
@@ -28,12 +29,29 @@ sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf-8', buffering=1)
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-logger = logging.getLogger(__name__)
 
+formatter = colorlog.ColoredFormatter(
+    "%(log_color)s - %(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    log_colors={
+        'DEBUG': 'cyan',
+        'INFO': 'green',
+        'WARNING': 'yellow',
+        'ERROR': 'red',
+        'CRITICAL': 'bold_red',
+    }
+)
+handler = logging.StreamHandler()
+handler.setFormatter(formatter)
+logger = logging.getLogger(__name__)
+# logger.addHandler(handler)
+# logger.setLevel(logging.DEBUG)
+programLogger = logging.getLogger("programLogger")
+programLogger.setLevel(logging.DEBUG)
+programLogger.addHandler(handler)
+# programLogger.propagate = False
+programLogger.info("START THE PROGRAM") 
 load_dotenv()
 api_token = os.getenv("API_TOKEN")
-
-
 # Defining stages of the conversation
 GET_USERNAME, GET_PASSWORD, SUBMIT_PASSWORD, LOGIN ,CONFIRM_PASSWORD,PROCESS_SEMESTER,MENU= range(7)
 # Callback data
@@ -49,17 +67,57 @@ def browsereOptions():
     option.add_argument('--window-size=1920,1080')  
     return option
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    programLogger.info("stert telegram bot")
+    programLogger.info("try fetch user data from userCourse.db")
+    context.user_data["userID"] = update.message.from_user.id
+    conn = sqlite3.connect('userCourse.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM userData WHERE userID = ?", (context.user_data["userID"],))
+    userData = cursor.fetchone()    
+    cursor.close()
+
+    if userData:
+        programLogger.info("successfully fetch user data from userCourse.db, user id: %s",context.user_data["userID"])
+        context.user_data['username'] = userData[1]
+        context.user_data['password'] = userData[2]
+        # try:
+        websiteGrab, state = await login(context.user_data['username'], context.user_data['password'])
+        user[context.user_data["userID"]] = websiteGrab
+        
+        if state == "登入成功":
+            await update.message.reply_text(text="登入成功")
+            return await menu(update, context)
+        elif state == "帳密出錯":
+            await update.message.reply_text(text="登入失敗請重新操作")
+            return ConversationHandler.END
+        # except:
+            # await query.message.reply_text(text="登入失敗請重新操作")
+            # print("error")
+            # return ConversationHandler.END
+    else:
+        programLogger.info("can't fetch user data from userCourse.db")
+        keyboard = [
+            [InlineKeyboardButton("登入教學務系統", callback_data=str(START))]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("尚未登入教學務系統，請登入：", reply_markup=reply_markup)
+        return GET_USERNAME
+
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("Start menu")
-    
+    programLogger.info("start menu")
+    programLogger.info("try fetch user data from userCourse.db")
     conn = sqlite3.connect('userCourse.db')
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM userData WHERE userID = ?", (context.user_data["userID"],))
     userData = cursor.fetchone()
     if not userData:
+        programLogger.info("cant't fetch user data, insert new data to userCourse.db")
+        programLogger.info(f"user id: {context.user_data['userID']}, username: {context.user_data['username']}, password: {context.user_data['password']}")
         cursor.execute("INSERT INTO userData (userID, account, password) VALUES (?, ?, ?)", (context.user_data["userID"], context.user_data['username'], context.user_data['password']))
         conn.commit()
     conn.close()
+
     keyboard = [
         [InlineKeyboardButton("查詢課表", callback_data=str(GET_SCHEDULE))],
         [InlineKeyboardButton("查詢成績", callback_data=str(GET_SCORE))],
@@ -76,48 +134,15 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         await update.message.reply_text(text="已登入教學務系統，請選擇：", reply_markup=reply_markup)
     return MENU
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data["userID"] = update.message.from_user.id
-    conn = sqlite3.connect('userCourse.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM userData WHERE userID = ?", (context.user_data["userID"],))
-    userData = cursor.fetchone()    
-    cursor.close()
-    if userData:
-        print("userData: ",userData)
-        context.user_data['username'] = userData[1]
-        context.user_data['password'] = userData[2]
-        # try:
-        websiteGrab, state = await login(context.user_data['username'], context.user_data['password'])
-        user[context.user_data["userID"]] = websiteGrab
-        print("return value: ",websiteGrab, state)
-        if state == "登入成功":
-            await update.message.reply_text(text="登入成功")
-            return await menu(update, context)
-        elif state == "帳密出錯":
-            await update.message.reply_text(text="登入失敗請重新操作")
-            return ConversationHandler.END
-        # except:
-            # await query.message.reply_text(text="登入失敗請重新操作")
-            # print("error")
-            # return ConversationHandler.END
-    else:
-        print("no userData")
-        print("user id: ",context.user_data["userID"])
-        keyboard = [
-            [InlineKeyboardButton("登入教學務系統", callback_data=str(START))]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("尚未登入教學務系統，請登入：", reply_markup=reply_markup)
-        return GET_USERNAME
-
 async def get_username(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    programLogger.info("get username")
     query = update.callback_query
     await query.answer()
     await query.message.reply_text(text="請輸入教學務系統帳號：")  # This will replace the original message and remove the buttons
     return GET_PASSWORD
 
 async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    programLogger.info("get password")
     username = update.message.text.strip()
     context.user_data['username'] = username
 
@@ -130,12 +155,14 @@ async def get_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return SUBMIT_PASSWORD
 
 async def submit_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    programLogger.info("submit password")
     query = update.callback_query
     await query.answer()
     await query.message.reply_text(text="請輸入教學務系統密碼：")
     return CONFIRM_PASSWORD
 
 async def confirm_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:  
+    programLogger.info("confirm password")
     password = update.message.text.strip()
     context.user_data['password'] = password
     keyboard = [
@@ -144,13 +171,12 @@ async def confirm_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("若確定無誤請按登入：", reply_markup=reply_markup)
-
     return LOGIN
 
 user={}
 
 async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("login_confirm")
+    programLogger.info("login confirm")
     global user
     if update.callback_query:
         query = update.callback_query
@@ -158,13 +184,16 @@ async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await query.message.reply_text(text="登入資訊已接收，處理中...")
         global websiteGrab
         try:
+            programLogger.info("try login")
             websiteGrab, state = await login(context.user_data['username'], context.user_data['password'])
             user[context.user_data["userID"]] = websiteGrab
-            print("return value: ",websiteGrab, state)
+            # print("return value: ",websiteGrab, state)
             if state == "登入成功":
+                programLogger.info("login success")
                 await query.message.reply_text(text="登入成功")
                 return await menu(update, context)
             elif state == "帳密出錯":
+                programLogger.error("login fail")
                 await query.message.reply_text(text="登入失敗請重新操作")
                 return ConversationHandler.END
         except:
@@ -175,19 +204,20 @@ async def login_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def get_semester(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("get_semester")
+    programLogger.info("get semester")
     query = update.callback_query
     await query.answer()
-    print("query.data: ",query.data)
-    # 根据用户选择设置action
-    action = query.data  # 假设callback_data直接传递了操作标记
+    # print("query.data: ",query.data)
+    action = query.data  
+    programLogger.info("user choose action: %s",action)
     context.user_data['action'] = action
     await query.message.reply_text(text="請輸入查詢學期，格式為\"學年\"+\"學期\"，如：1121")
     return PROCESS_SEMESTER
 
 async def process_semester(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    programLogger.info("process semester")
     semester = update.message.text.strip()
-    print("semester: ",semester)
+    programLogger.info("user input semester: %s",semester)
     context.user_data['semester'] = semester
     action = context.user_data.get('action')
     if action == str(GET_SCORE):
@@ -199,15 +229,15 @@ async def process_semester(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END  
     
 async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("get_score")
+    programLogger.info("get score")
     querySem = context.user_data['semester']
-    print("querySem: ",querySem)
+    programLogger.info("query semester: %s",querySem)
     await update.message.reply_text(text="處理中...")
-    
+    programLogger.info("try download grade")
     websiteGrab = user[context.user_data["userID"]]
     data,websiteGrab = await downloadGrade(websiteGrab,querySem)
 
-    print(data)
+    # print(data)
     html_content = scoreTable_head
     html_content += f"""
         <h1>{querySem[:3]}學年度 第{querySem[3]}學期 成績單</h1>
@@ -252,7 +282,7 @@ async def get_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
 
     filename = "Myscore.html"
-
+    programLogger.info("write html content to file")
     with open(filename, 'w', encoding='utf-8') as file:
         file.write(html_content)
 
@@ -277,13 +307,14 @@ async def take_screenshot(html, path_to_save):
     await browser.close()
 
 async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("get_schedule")
+    programLogger.info("get schedule")
     querySem = context.user_data['semester']
-    print("querySem: ",querySem)
+    programLogger.info("query semester: %s",querySem)
     await update.message.reply_text(text="處理中...")
     global websiteGrab
+    programLogger.info("try download schedule")
     data,websiteGrab = await downloadSchedule(user[context.user_data["userID"]],querySem)
-    print(data)
+    # print(data)
     html_content = schedule_head
     html_content += str(data)+";"
     html_content += schedule_tail
@@ -295,6 +326,7 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     fileName = "MySchedule.html"
     with open(fileName, 'w', encoding='utf-8') as file:
         file.write(html_content)
+    programLogger.info("write html content to file")
     path_to_screenshot = './schedule_schreenshot.png'  # 設定截圖保存路徑
     await take_screenshot(html_content, path_to_screenshot)
     await update.message.reply_photo(photo=open(path_to_screenshot, 'rb'))
@@ -305,7 +337,8 @@ async def get_schedule(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 #需要有一個查詢db此user選了多少堂課的function
 targetCourse = dict()
 async def input_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("input_course_id")
+    programLogger.info("input course id")
+    programLogger.info("try fetch user data from userCourse.db")
     userID = context.user_data["userID"]
     query = update.callback_query
     conn = sqlite3.connect('userCourse.db')
@@ -324,7 +357,7 @@ async def input_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     reply_markup = InlineKeyboardMarkup(keyboard)
     if userID not in targetCourse:
         targetCourse[userID] = []
-    content = f"您已選擇{len(targetCourse[userID])-1}門課程"
+    content = f"您已選擇{len(targetCourse[userID])}門課程"
     if len(targetCourse[userID]) > 5:
         content += "，可用額度已滿，若需修改搶課名單，請至\"修改搶課名單\"選項修改"
         await query.edit_message_text(text=content, reply_markup=reply_markup)
@@ -336,7 +369,7 @@ async def input_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         
 
 async def confirm_target_course(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("confirm_target_course")
+    programLogger.info("confirm target course")
     targetCourseID = update.message.text.strip()
     context.user_data['targetCourseID'] = targetCourseID
     content = f"您已選擇 {targetCourseID}，請繼續以下操作"
@@ -370,16 +403,18 @@ def format_course(course):
     """
 #需要一個檢查課號是否存在的function
 async def check_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    print("check_course_id") 
+    programLogger.info("check course id")
     courseID = context.user_data['targetCourseID']
+    programLogger.info("target course id: %s",courseID,"check course id is exist or not")
     data,websiteGrab = await searchCourse(user[context.user_data["userID"]],courseID)
     user[context.user_data["userID"]] = websiteGrab
     context.user_data['targetCourseData'] = data
     query = update.callback_query
     userID = context.user_data["userID"]
-    print("data",data)
+    # print("data",data)
     if len(data) == 1:
         # targetCourse[userID].append(f"{courseID},{data[0]['課名'].strip()},{data[0]['年級班別'].strip()}")
+        programLogger.info("course id exist, add into database")
         conn = sqlite3.connect('userCourse.db')
         cursor = conn.cursor()
         value = f"{courseID}:{data[0]['課名'].strip()}:{data[0]['年級班別'].strip()}:0,"
@@ -390,7 +425,7 @@ async def check_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM snapCourse WHERE account = ? AND password = ? AND course = ? ", (context.user_data['username'], context.user_data['password'], courseID))
         checkData = cursor.fetchone()[0]
-        print("checkData",checkData)
+        # print("checkData",checkData)
         if checkData < 4:
             cursor.execute("INSERT INTO snapCourse (account, password, course) VALUES (?, ?, ?)", (context.user_data['username'], context.user_data['password'], courseID))
             conn.commit()
