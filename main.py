@@ -50,6 +50,8 @@ def browsereOptions():
     return option
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    print("Start menu")
+    
     conn = sqlite3.connect('userCourse.db')
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM userData WHERE userID = ?", (context.user_data["userID"],))
@@ -58,7 +60,6 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         cursor.execute("INSERT INTO userData (userID, account, password) VALUES (?, ?, ?)", (context.user_data["userID"], context.user_data['username'], context.user_data['password']))
         conn.commit()
     conn.close()
-    print("menu")
     keyboard = [
         [InlineKeyboardButton("查詢課表", callback_data=str(GET_SCHEDULE))],
         [InlineKeyboardButton("查詢成績", callback_data=str(GET_SCORE))],
@@ -314,7 +315,6 @@ async def input_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if userData[3] == None:
         targetCourse[userID] = []
     else:
-        print("userData[3]",userData[3] )
         courses = userData[3].split(",")
         targetCourse[userID] = courses
     await query.answer()
@@ -377,11 +377,12 @@ async def check_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data['targetCourseData'] = data
     query = update.callback_query
     userID = context.user_data["userID"]
+    print("data",data)
     if len(data) == 1:
-        targetCourse[userID].append(f"{courseID},{data[0]['課名'].strip()},{data[0]['年級班別'].strip()}")
+        # targetCourse[userID].append(f"{courseID},{data[0]['課名'].strip()},{data[0]['年級班別'].strip()}")
         conn = sqlite3.connect('userCourse.db')
         cursor = conn.cursor()
-        value = f"{courseID}:{data[0]["課名"].strip()}:{data[0]["年級班別"].strip()}:0,"
+        value = f"{courseID}:{data[0]['課名'].strip()}:{data[0]['年級班別'].strip()}:0,"
         cursor.execute("UPDATE userData SET courses = courses || ? WHERE userID = ?", (value, userID))
         conn.commit()
         cursor.close()
@@ -410,7 +411,7 @@ async def check_course_id(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text(text=content, reply_markup=reply_markup)
         return GRAB_COURSE
     else:
-        await query.edit_message_text(text="查無此課號，請重新輸入")
+        await query.message.reply_text(text="查無此課號，請重新輸入")
         return await input_course_id(update, context)
 
 
@@ -423,11 +424,12 @@ async def check_course_id_and_back_to_menu(update: Update, context: ContextTypes
     data,websiteGrab = await searchCourse(user[context.user_data["userID"]],courseID)
     user[context.user_data["userID"]] = websiteGrab
     context.user_data['targetCourseData'] = data
+    print("data",data)
     if len(data) == 1:
-        targetCourse[userID].append(f"{courseID},{data[0]['課名'].strip()},{data[0]['年級班別'].strip()}")
+        # targetCourse[userID].append(f"{courseID},{data[0]['課名'].strip()},{data[0]['年級班別'].strip()}")
         conn = sqlite3.connect('userCourse.db')
         cursor = conn.cursor()
-        value = f"{courseID}:{data[0]["課名"].strip()}:{data[0]["年級班別"].strip()}:0,"
+        value = f"{courseID}:{data[0]['課名'].strip()}:{data[0]['年級班別'].strip()}:0,"
         cursor.execute("UPDATE userData SET courses = courses || ? WHERE userID = ?", (value, userID))
         conn.commit()
         cursor.close()
@@ -456,23 +458,23 @@ async def check_course_id_and_back_to_menu(update: Update, context: ContextTypes
         await query.edit_message_text(text=content, reply_markup=reply_markup)
         return GRAB_COURSE
     else:
-        query.edit_message_text(text="查無此課號，請重新輸入")
+        await query.message.reply_text(text="查無此課號，請重新輸入")
         return await input_course_id(update, context)
 
 async def choose_course(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("choose_course")
     query = update.callback_query
     await query.answer()
-    choose_course = query.data[15:]
-    print("choose_course",choose_course)
-    choose_course = [char for char in choose_course if char.isupper()]
+    grade_class = query.data[14:-2]
+    print("choose_course",grade_class)
     userID = context.user_data["userID"]
     courseID = context.user_data["targetCourseID"]
     data = context.user_data["targetCourseData"]
-    targetCourse[userID].append(f"{courseID},{data[0]['課名'].strip()},{data[0]['年級班別'].strip()}")
+    # targetCourse[userID].append(f"{courseID},{data[0]['課名'].strip()},{data[0]['年級班別'].strip()}")
+    value = f"{courseID}:{data[0]['課名'].strip()}:{grade_class}:0,"
+    print("value",value)
     conn = sqlite3.connect('userCourse.db')
     cursor = conn.cursor()
-    value = f"{courseID}:0,"
     cursor.execute("UPDATE userData SET courses = courses || ? WHERE userID = ?", (value, userID))
     conn.commit()
     cursor.close()
@@ -482,7 +484,9 @@ async def choose_course(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     checkData = cursor.fetchone()[0]
     print("checkData",checkData)
     if checkData < 4:
-        cursor.execute("INSERT INTO snapCourse (account, password, course) VALUES (?, ?, ?)", (context.user_data['username'], context.user_data['password'], courseID))
+        grade_class = [char for char in grade_class if char.isupper()]
+        grade_class = "".join(grade_class)
+        cursor.execute("INSERT INTO snapCourse (account, password, course, which) VALUES (?, ?, ?, ?)", (context.user_data['username'], context.user_data['password'], courseID, grade_class))
         conn.commit()
     cursor.close()
     
@@ -515,11 +519,14 @@ async def look_grab_course_state(update: Update, context: ContextTypes.DEFAULT_T
     else:
         content = "您已選擇的課程如下："
     keyboard = []
+    targetCourse[userID] = [i for i in targetCourse[userID] if i]
     print("targetCourse[userID]",targetCourse[userID])
     for course in targetCourse[userID]:
+        returnData = course
         info = course.split(":")
-        courseInfo = f"{info[0]}\n{info[1]}\n{info[2]}"
-        keyboard.append([InlineKeyboardButton(courseInfo, callback_data=f"EDIT_COURSE_STATE_{course}"),])
+        courseInfo = f"{info[0]}  {info[1]}  {info[2]}"
+        # print("courseInfo",courseInfo)
+        keyboard.append([InlineKeyboardButton(courseInfo, callback_data=f"EDIT_COURSE_STATE_{returnData}"),])
     keyboard.append([InlineKeyboardButton("回主選單", callback_data=str(BACK_TO_MENU))])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -557,13 +564,35 @@ async def delete_grab_course(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.answer()
     userID = context.user_data["userID"]
     print("context.user_data[editedCourse]",context.user_data["editedCourse"])
+    conn = sqlite3.connect('userCourse.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM userData WHERE userID = ?", (userID,))
+    userData = cursor.fetchone()
+    if userData[3] == None:
+        targetCourse[userID] = []
+    else:
+        print("userData[3]",userData[3] )
+        courses = userData[3].split(",")
+        targetCourse[userID] = courses
+    targetCourse[userID] = [i for i in targetCourse[userID] if i]
+    print("targetCourse[userID]",targetCourse[userID])
+    print("context.user_data[editedCourse]",context.user_data["editedCourse"])
     targetCourse[userID].remove(context.user_data["editedCourse"])
+    print("targetCourse[userID]",targetCourse[userID])
+    value = ",".join(targetCourse[userID])
+    cursor.execute("UPDATE userData SET courses = ? WHERE userID = ?", (value, userID))
+    conn.commit()
+    cursor.close()
+    conn = sqlite3.connect('snapCourse.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM snapCourse WHERE account = ? AND password = ? AND course = ? ", (context.user_data['username'], context.user_data['password'], context.user_data["editedCourse"].split(":")[0]))
     await query.message.reply_text(text="已刪除此搶課課程")
     return await menu(update, context)
 
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     print("logout")
     query = update.callback_query
+    user[context.user_data["userID"]].close()
     await query.answer()
     await query.message.reply_text(text="您已登出教學務系統。")
     return START

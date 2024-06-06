@@ -54,7 +54,7 @@ async def handleDialog(dialog):
 
 async def login(account, password): 
     global msn
-    browser = await launch(headless=True,
+    browser = await launch(headless=False,
                            dumpio=True,
                            args=[f'--window-size={1920},{1080}',
                                '--disable-features=TranslateUI', 
@@ -251,7 +251,6 @@ async def userCourses(account):
 async def searchCourse(browser, course):
     all_pages = await browser.pages()
     page = all_pages[0]
-    await asyncio.sleep(2.5)
     menuFrame = await findFrameByName(page, 'menuFrame')
     mainFrame = await findFrameByName(page, 'mainFrame')
     menuFrame = None; mainFrame = None
@@ -265,14 +264,14 @@ async def searchCourse(browser, course):
     selectors_and_frames = [
         (menuFrame, '#Menu_TreeViewt1'),
         (menuFrame, '#Menu_TreeViewt31'),
-        (menuFrame, '#Menu_TreeViewt40'),
-        (mainFrame, '#Q_CH_LESSON')]
+        (menuFrame, '#Menu_TreeViewt40')]
 
     for frame, selector in selectors_and_frames:
         if await waitForSelectorOrTimeout(frame, selector):
             await frame.click(selector)
-
-    await mainFrame.evaluate(f"""() => {{document.getElementById('Q_CH_LESSON').value = '{course}';}}""")
+    await asyncio.sleep(0.5)
+    if await waitForSelectorOrTimeout(mainFrame, '#Q_CH_LESSON'):
+        await mainFrame.evaluate(f"""() => {{document.getElementById('Q_CH_LESSON').value = '{course}';}}""")
     if await waitForSelectorOrTimeout(mainFrame, '#QUERY_BTN7'):
         await mainFrame.click('#QUERY_BTN7')
     if await waitForSelectorOrTimeout(mainFrame, '#DataGrid tbody tr'):
