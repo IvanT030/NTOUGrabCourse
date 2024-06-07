@@ -102,42 +102,64 @@ def login(loginWebsite, account, password, key):
         userWeb[account] = [loginWebsite, 'none']
         result[key] = "登入成功"
  
-def downloadScedule(user ,myWebsite, semester, key):
-    global result
-    global userWeb
-    userWeb[user][1] = 'working'
-    year = semester[:3]; sms = semester[3]  
-    menuFrame = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.NAME, 'menuFrame')))
-    myWebsite.switch_to.frame(menuFrame)
-    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt1'))).click()
-    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt30'))).click()
-    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'Menu_TreeViewt41'))).click()
-    myWebsite.switch_to.default_content()
-    mainFrame = WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.NAME, 'mainFrame')))
-    myWebsite.switch_to.frame(mainFrame)
-    yearSelector = Select(WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.ID, 'Q_AYEAR'))))
-    yearSelector.select_by_value(f'{year}')
-    smsSelector = Select(WebDriverWait(myWebsite, 10).until(EC.presence_of_element_located((by.ID, 'Q_SMS'))))
-    smsSelector.select_by_value(f'{sms}')
-    WebDriverWait(myWebsite, 10).until(EC.element_to_be_clickable((by.ID, 'QUERY_BTN3'))).click()
-    time.sleep(0.5)
-    lessons = WebDriverWait(myWebsite, 10).until(EC.presence_of_all_elements_located((by.XPATH, '//*[@id="table2"]/tbody/tr')))
-    scedule = [[],[],[],[],[],[],[],[],[],[],[],[],[],[],[]]
-    for i, rowlessons in enumerate(lessons, start=-1):
-        if i == -1:
-            continue
-        tds = rowlessons.find_elements(by.TAG_NAME, 'td')
-        for td in tds:
-            if td.get_attribute('innerText') == '\xa0':
-                scedule[i].append('None')
-            else:
-                scedule[i].append(td.get_attribute('innerText'))
-    myWebsite.switch_to.default_content()
-    myWebsite.refresh()
-    result[key] = scedule
-    userWeb[user] = [myWebsite, 'none']
+async def snipeCourse(browser, course, which=None, resnipe = False): #回傳browser跟 搶課狀態
+    #resnipe指的是要不要按旁便那一欄的按鈕，也就是選課系統，線上即時加退選 etc..
+    #which是判斷同課號但不同的課程，分AB班 
+    global dialogMsnType
+    all_pages = await browser.pages()
+    page = all_pages[0]
+    menuFrame = None; mainFrame = None
+    menuFrame = await findFrameByName(page, 'menuFrame')
+    mainFrame = await findFrameByName(page, 'mainFrame')
 
-def monitor_variable(account, function, *args): #之後要加key
+    if not resnipe: 
+        selectors_and_frames = [
+            (menuFrame, '#Menu_TreeViewt1'),
+            (menuFrame, '#Menu_TreeViewt31'),
+            (menuFrame, '#Menu_TreeViewt41')]
+
+        for frame, selector in selectors_and_frames:
+            if await waitForSelectorOrTimeout(frame, selector):
+                await frame.click(selector)
+
+    if await waitForSelectorOrTimeout(mainFrame, '#Q_COSID'):
+        await mainFrame.evaluate(f"""() => {{
+            document.getElementById('Q_COSID').value = '{course}';
+        }}""")
+    if await waitForSelectorOrTimeout(mainFrame, '#QUERY_COSID_BTN'):
+        await mainFrame.click('#QUERY_COSID_BTN')
+    await asyncio.sleep(1)#會抓到其他的
+
+    if await waitForSelectorOrTimeout(mainFrame, '#DataGrid1 tbody tr'):
+        trs = await mainFrame.querySelectorAll('#DataGrid1 tbody tr')
+
+    if len(trs) == 2:
+        if await waitForSelectorOrTimeout(mainFrame, '#DataGrid1_ctl02_edit'):
+            await mainFrame.click('#DataGrid1_ctl02_edit')
+    else:
+        for i, tr in enumerate(trs):
+            if i == 0:
+                continue
+            tds = await tr.querySelectorAll('td')
+            whichClass = await (await tds[3].getProperty('innerText')).jsonValue()
+            print(whichClass)
+            
+            if which: 
+                if which.upper() == whichClass.upper():
+                    onclick = await tds[0].querySelector('a')
+                    await onclick.click()
+
+    await asyncio.sleep(2)
+    tmpDialogMsnType = dialogMsnType; dialogMsnType = -1
+    if tmpDialogMsnType == -1 or tmpDialogMsnType == 0:
+        return browser, "搶課失敗"
+    elif tmpDialogMsnType == 1:
+        return browser, "搶課成功"
+    elif tmpDialogMsnType == 4:
+        return browser, "人滿"
+    #回傳是否可以resnipe, browser
+    
+def monitor_variable(account, function, *args):
     while True:
         if userWeb[account][1] == 'none':
             print(account + "變數已經變為 none")
@@ -157,7 +179,6 @@ async def check_complete(key):
 
 async def do_task():
     copied_task = []
-    keys = set()
     global tasks
     while len(tasks) > 0:
         print('idol')
@@ -212,22 +233,19 @@ async def push_and_return_task(req):
     while unique_key not in result:
         await asyncio.sleep(0.2)
     return result.pop(unique_key)
-
-#####
-#    while thread.is_alive():
-#        await asyncio.sleep(1)    
-#    print(f'{req[0]} is dead')
-#####
     
 async def main():
     print('send request 1')
     await push_and_return_task(['01157132', 'a78874884', 'login'])
-    #await asyncio.sleep(2)
-    #print('send request 2')
-    #await push_and_return_task(['01157132', 'a78874884', 'downloadScedule', '1111'])
-    #await asyncio.sleep(3)
+    await asyncio.sleep(2)
+    print('send request 2')
+    await push_and_return_task(['downloadScedule', '1111'])
+    await asyncio.sleep(3)
     print('send request 3')
-    await push_and_return_task(['01157116','Pwken531368','login'])
+    await push_and_return_task([])
 
 if __name__ == '__main__':
     asyncio.run(main())
+
+#TODO
+#開一個新的DB存放已經搶到的課號

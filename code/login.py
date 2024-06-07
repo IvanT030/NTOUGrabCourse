@@ -9,9 +9,9 @@ import re
 import time
 import aiosqlite
 
-fail_types = ('未找到課程','課程不可選','選取失敗','系統錯誤','年級不可加選！','衝堂不可選！','本類主領域(博雅課程)課程限選2門！')
-success_types = ('本科目設有檢查人數下限。選本課程，在未達下限人數前時無法退選，確定加選?', '成功選取')
-msn = -1
+fail_types = ('該課程已達人數上限','未找到課程','課程不可選','選取失敗','系統錯誤','年級不可加選！','衝堂不可選！','本類主領域(博雅課程)課程限選2門！')
+success_types = ('成功選取','該課程已有加選過')
+dialogMsnType = -1
 dialogHandled = asyncio.Event()
 
 async def findFrameByName(page, frameName):
@@ -23,7 +23,7 @@ async def findFrameByName(page, frameName):
         if frame.name == frameName:
             return frame
 
-async def waitForSelectorOrTimeout(frame, selector, timeout=30000):
+async def waitForSelectorOrTimeout(frame, selector, timeout=10000):
     try:
         await frame.waitForSelector(selector, {'visible': True})
         return True
@@ -32,30 +32,29 @@ async def waitForSelectorOrTimeout(frame, selector, timeout=30000):
         return False
 
 async def handleDialog(dialog):
-    global msn
+    global dialogMsnType
     text = dialog.message
-    print(text)
+    print(f'alarm: {text}')
     if text == '驗證碼錯誤，請再重新輸入!!':
-        msn = 2
+        dialogMsnType = 2
     elif text == '帳號或密碼錯誤，請查明後再登入，若您不確定密碼，請執行忘記密碼，取得新密碼後再登入!':
-        msn = 3
-    elif '該課程已達人數上限' in text:
-        msn = 4
+        dialogMsnType = 3
     else:
         for fail_type in fail_types:
             if fail_type in text:
-                msn = 0
+                dialogMsnType = 0
                 break
         for success_type in success_types:
             if success_type in text:
-                msn = 1
+                dialogMsnType = 1
                 break
     await dialog.accept()
 
-async def login(account, password): 
-    global msn
+async def login(account, password): #回傳browser跟登入是否成功的字串
+    global dialogMsnType
     browser = await launch(headless=False,
                            dumpio=True,
+                           #slowmo='50',
                            args=[f'--window-size={1920},{1080}',
                                '--disable-features=TranslateUI', 
                                '--no-sandbox'],
@@ -67,7 +66,7 @@ async def login(account, password):
     loginWebsite.on('dialog', lambda dialog: asyncio.ensure_future(handleDialog(dialog)))
     await loginWebsite.setViewport({'width': 1920, 'height': 1080})
     async def relogin(browser):
-        global msn
+        global dialogMsnType
         all_pages = await browser.pages()
         loginWebsite = all_pages[0]
         #輸入密碼
@@ -91,7 +90,7 @@ async def login(account, password):
             loginButton = await loginWebsite.querySelector('#LGOIN_BTN')
             await loginButton.click()
         # await asyncio.sleep(2)
-        tmp = msn; msn = -1
+        tmp = dialogMsnType; dialogMsnType = -1
         if tmp == -1:
             return browser, "登入成功"
         elif tmp == 2:
@@ -133,7 +132,7 @@ async def login(account, password):
 
     await asyncio.sleep(2)
 
-    tmp = msn; msn = -1
+    tmp = dialogMsnType; dialogMsnType = -1
     if tmp == -1:
         print('browser + ', browser)
         return browser, "登入成功"
@@ -148,7 +147,7 @@ async def login(account, password):
         await browser.close()
         return None, "未知錯誤"
 
-async def downloadSchedule(browser, semester):
+async def downloadSchedule(browser, semester): #回傳data再傳browser
     all_pages = await browser.pages()
     page = all_pages[0]
     year = semester[:3]; sms = semester[3]  
@@ -177,7 +176,7 @@ async def downloadSchedule(browser, semester):
                 return cells.map(cell => cell.innerText);
             });
         }''')
-    print(table_content)
+    #print(table_content)
     await page.reload()
     return table_content, browser
 
@@ -251,6 +250,7 @@ async def userCourses(account):
 async def searchCourse(browser, course):
     all_pages = await browser.pages()
     page = all_pages[0]
+    await asyncio.sleep(2.5)
     menuFrame = await findFrameByName(page, 'menuFrame')
     mainFrame = await findFrameByName(page, 'mainFrame')
     menuFrame = None; mainFrame = None
@@ -270,6 +270,11 @@ async def searchCourse(browser, course):
         if await waitForSelectorOrTimeout(frame, selector):
             await frame.click(selector)
     await asyncio.sleep(0.5)
+    if await waitForSelectorOrTimeout(mainFrame, '#tabs > ul > li:nth-child(2)'):
+        await mainFrame.click('#tabs > ul > li:nth-child(2)')
+    await asyncio.sleep(0.5)
+    if await waitForSelectorOrTimeout(mainFrame, '#Q_CH_LESSON'):
+        await mainFrame.evaluate(f"""() => {{document.getElementById('Q_CH_LESSON').value = '{course}';}}""")
     if await waitForSelectorOrTimeout(mainFrame, '#Q_CH_LESSON'):
         await mainFrame.evaluate(f"""() => {{document.getElementById('Q_CH_LESSON').value = '{course}';}}""")
     if await waitForSelectorOrTimeout(mainFrame, '#QUERY_BTN7'):
@@ -297,73 +302,16 @@ async def searchCourse(browser, course):
             "期限": await (await tds[16].getProperty('innerText')).jsonValue()
         }
         data.append(td_innerText)
+    print(data)
     await page.reload()
     return data, browser
-
-async def snipeCourse(resnipe, browser, course, which=None):
-    global msn
-    all_pages = await browser.pages()
-    page = all_pages[0]
-    menuFrame = None; mainFrame = None
-    print('here')
-    menuFrame = await findFrameByName(page, 'menuFrame')
-    mainFrame = await findFrameByName(page, 'mainFrame')
-
-    if not resnipe: 
-        selectors_and_frames = [
-            (menuFrame, '#Menu_TreeViewt1'),
-            (menuFrame, '#Menu_TreeViewt31'),
-            (menuFrame, '#Menu_TreeViewt41')]
-
-        for frame, selector in selectors_and_frames:
-            if await waitForSelectorOrTimeout(frame, selector):
-                await frame.click(selector)
-
-    if await waitForSelectorOrTimeout(mainFrame, '#Q_COSID'):
-        await mainFrame.evaluate(f"""() => {{
-            document.getElementById('Q_COSID').value = '{course}';
-        }}""")
-    if await waitForSelectorOrTimeout(mainFrame, '#QUERY_COSID_BTN'):
-        await mainFrame.click('#QUERY_COSID_BTN')
-    await asyncio.sleep(1)#會抓到其他的
-
-    if await waitForSelectorOrTimeout(mainFrame, '#DataGrid1 tbody tr'):
-        trs = await mainFrame.querySelectorAll('#DataGrid1 tbody tr')
-
-    if len(trs) == 2:
-        if await waitForSelectorOrTimeout(mainFrame, '#DataGrid1_ctl02_edit'):
-            await mainFrame.click('#DataGrid1_ctl02_edit')
-    else:
-        for i, tr in enumerate(trs):
-            if i == 0:
-                continue
-            tds = await tr.querySelectorAll('td')
-            whichClass = await (await tds[3].getProperty('innerText')).jsonValue()
-            print(whichClass)
-            
-            if which: 
-                if which.upper() == whichClass.upper():
-                    onclick = await tds[0].querySelector('a')
-                    await onclick.click()
-
-    await asyncio.sleep(2)
-    tmp = msn; msn = -1
-    if tmp == -1 or tmp == 0:
-        return True, browser, "搶課失敗"
-    elif tmp == 1:
-        return True, browser, "搶課成功"
-    elif tmp == 4:
-        return True, browser, "人滿"
-    #回傳是否可以resnipe, browser
-    
+ 
 async def main():
-    a, b = await login('01157132', 'R125179001')
-    a,b =await searchCourse(a, 'asd')
-    print(a)
-    b.close()
-    #await snipeCourse(a, 'B5701M3J', 'A')
+    a, b = await login('01157132', 'Ycsm0613')
+    #table, a = await downloadGrade(a, '1121')
+    a, b =await searchCourse(a, 'B57031EC')
 
-# asyncio.get_event_loop().run_until_complete(main())
+#asyncio.get_event_loop().run_until_complete(main())
 
 #使用時間逾時, 系統已將您自動登出, 請再重新登入使用本系統!! <== 掛機alert
 #系統同時一次僅許可一個帳號登入，你已登入過系統，請先登出原帳號再登入!
